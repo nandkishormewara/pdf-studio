@@ -1,0 +1,21 @@
+{
+  "description": "Page-unit <-> PDF user space conversions produced by PDF.js (web app ground truth). Page units: points, origin top-left of the page as displayed, /Rotate applied. All SDKs must reproduce these.",
+  "cases": [
+    {"crop":[50,30,650,830],"rotation":0,"pdf":[50,30],"page":[0,800],"pageSize":[600,800]},
+    {"crop":[50,30,650,830],"rotation":0,"pdf":[650,830],"page":[600,0],"pageSize":[600,800]},
+    {"crop":[50,30,650,830],"rotation":0,"pdf":[100,700],"page":[50,130],"pageSize":[600,800]},
+    {"crop":[50,30,650,830],"rotation":0,"pdf":[400,64.5],"page":[350,765.5],"pageSize":[600,800]},
+    {"crop":[50,30,650,830],"rotation":90,"pdf":[50,30],"page":[0,0],"pageSize":[800,600]},
+    {"crop":[50,30,650,830],"rotation":90,"pdf":[650,830],"page":[800,600],"pageSize":[800,600]},
+    {"crop":[50,30,650,830],"rotation":90,"pdf":[100,700],"page":[670,50],"pageSize":[800,600]},
+    {"crop":[50,30,650,830],"rotation":90,"pdf":[400,64.5],"page":[34.5,350],"pageSize":[800,600]},
+    {"crop":[50,30,650,830],"rotation":180,"pdf":[50,30],"page":[600,0],"pageSize":[600,800]},
+    {"crop":[50,30,650,830],"rotation":180,"pdf":[650,830],"page":[0,800],"pageSize":[600,800]},
+    {"crop":[50,30,650,830],"rotation":180,"pdf":[100,700],"page":[550,670],"pageSize":[600,800]},
+    {"crop":[50,30,650,830],"rotation":180,"pdf":[400,64.5],"page":[250,34.5],"pageSize":[600,800]},
+    {"crop":[50,30,650,830],"rotation":270,"pdf":[50,30],"page":[800,600],"pageSize":[800,600]},
+    {"crop":[50,30,650,830],"rotation":270,"pdf":[650,830],"page":[0,0],"pageSize":[800,600]},
+    {"crop":[50,30,650,830],"rotation":270,"pdf":[100,700],"page":[130,550],"pageSize":[800,600]},
+    {"crop":[50,30,650,830],"rotation":270,"pdf":[400,64.5],"page":[765.5,250],"pageSize":[800,600]}
+  ]
+}

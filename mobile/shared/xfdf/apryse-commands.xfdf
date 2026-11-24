@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xfdf xmlns="http://ns.adobe.com/xfdf/" xml:space="preserve">
+  <add>
+    <square page="1" rect="100,100,200,150" color="#E44234" flags="print" name="c-box-1" title="Reviewer" subject="Rectangle" date="D:20260116090000Z" width="2" />
+  </add>
+  <modify>
+    <square page="0" rect="310,510,430,570" color="#111111" flags="print" name="f-box-1" title="Reviewer" subject="Rectangle" date="D:20260116090100Z" width="4" />
+  </modify>
+  <delete>
+    <id page="0">f-oval-1</id>
+  </delete>
+</xfdf>

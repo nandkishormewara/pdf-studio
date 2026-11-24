@@ -1,0 +1,11 @@
+# Runtime
+fastapi==0.156.4
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+pikepdf==10.17.0          # MPL-2.0 (used as a library, unmodified)
+pypdfium2==5.14.0         # Apache-2.0 / BSD-3 (PDFium)
+pillow==13.0.0
+pyHanko==0.38.0           # MIT
+pyhanko-certvalidator==0.33.0
+cryptography==50.0.2
+asn1crypto==1.5.1

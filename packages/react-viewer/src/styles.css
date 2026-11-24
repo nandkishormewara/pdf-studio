@@ -1,0 +1,121 @@
+/* @pdf-studio/react-viewer — everything is scoped under .psv so several viewers and the host app coexist. */
+.psv {
+  --psv-accent: #1a3581;
+  --psv-ink: #1f2a4c;
+  --psv-muted: #7d879d;
+  --psv-border: rgba(31, 42, 76, 0.14);
+  --psv-bg: #eef1f6;
+  position: relative; width: 100%; height: 100%; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--psv-bg); color: var(--psv-ink);
+  font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  outline: none;
+}
+.psv *, .psv *::before, .psv *::after { box-sizing: border-box; }
+.psv button { font: inherit; color: inherit; }
+
+/* ---------- Toolbar (edit mode) ---------- */
+.psv-toolbar {
+  flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px;
+  background: #fff; border-bottom: 1px solid var(--psv-border);
+  overflow-x: auto; scrollbar-width: thin;
+}
+.psv-group { display: flex; align-items: center; gap: 2px; padding-right: 6px; margin-right: 2px; border-right: 1px solid var(--psv-border); flex: none; }
+.psv-group:last-child { border-right: 0; }
+.psv-end { margin-left: auto; }
+.psv-toolbar button {
+  display: grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 1px solid transparent; border-radius: 6px; background: none; cursor: pointer;
+}
+.psv-toolbar button:hover:not(:disabled) { background: rgba(26, 53, 129, 0.08); }
+.psv-toolbar button.active { background: rgba(26, 53, 129, 0.12); border-color: rgba(26, 53, 129, 0.35); color: var(--psv-accent); }
+.psv-toolbar button:disabled { opacity: 0.35; cursor: default; }
+.psv-toolbar .psv-swatch { width: 22px; height: 22px; border-radius: 50%; background: var(--swatch); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--psv-border); }
+.psv-toolbar .psv-swatch.active { box-shadow: 0 0 0 2px var(--psv-accent); border-color: #fff; background: var(--swatch); }
+.psv-toolbar select { height: 28px; border: 1px solid var(--psv-border); border-radius: 6px; background: #fff; padding: 0 4px; margin-left: 4px; font: inherit; }
+
+/* ---------- Pages ---------- */
+.psv-scroll { flex: 1; min-height: 0; overflow: auto; position: relative; -webkit-overflow-scrolling: touch; }
+.psv-pages { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px; width: max-content; min-width: 100%; }
+.psv-page { position: relative; background: #fff; box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18); flex: none; }
+.psv-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.psv-page-error { position: absolute; inset: 0; display: grid; place-items: center; color: #c2410c; padding: 20px; text-align: center; }
+
+/* Text layer (adapted from pdf.js, Apache-2.0) */
+.psv .textLayer {
+  position: absolute; inset: 0; overflow: clip; opacity: 1; line-height: 1; text-align: initial;
+  text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; z-index: 1;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.psv .textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; user-select: text; }
+.psv .textLayer > :not(.markedContent), .psv .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.psv .textLayer .markedContent { display: contents; }
+.psv .textLayer ::selection { background: rgb(0 90 255 / 0.25); }
+.psv .textLayer.markup ::selection { background: rgb(255 200 0 / 0.45); }
+.psv .textLayer.markup { cursor: crosshair; }
+.psv .textLayer br::selection { background: transparent; }
+
+/* ---------- Annotation layer ---------- */
+.psv-annots { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; overflow: visible; touch-action: none; cursor: crosshair; }
+.psv-annots .psv-annot { pointer-events: none; }
+/* select, markup and read-only: clicks fall through to the text layer except on shapes */
+.psv-annots.tool-select, .psv-annots.tool-highlight, .psv-annots.tool-underline,
+.psv-annots.tool-strikeout, .psv-annots.tool-squiggly, .psv-annots.readonly { pointer-events: none; touch-action: auto; cursor: auto; }
+.psv-annots.editable.tool-select .psv-annot { pointer-events: visiblePainted; cursor: move; }
+.psv-annots.editable.tool-select .psv-annot rect[fill='transparent'] { pointer-events: all; }
+.psv-annots.tool-eraser { cursor: cell; }
+.psv-annots.tool-eraser .psv-annot { pointer-events: visiblePainted; }
+.psv-annots.tool-eraser .psv-annot rect[fill='transparent'] { pointer-events: all; }
+.psv-annots.tool-eraser .psv-annot:hover { opacity: 0.45; }
+.psv-annots .psv-annot.kind-note { pointer-events: all; cursor: pointer; }
+.psv-annots:not(.tool-select, .readonly, .tool-eraser) .psv-annot.kind-note { pointer-events: none; }
+.psv-preview { opacity: 0.75; pointer-events: none; }
+.psv-selection rect:first-child { fill: none; stroke: var(--psv-accent); stroke-width: 1px; vector-effect: non-scaling-stroke; stroke-dasharray: 4 3; pointer-events: none; }
+.psv-selection .psv-handle { fill: #fff; stroke: var(--psv-accent); stroke-width: 1.5px; vector-effect: non-scaling-stroke; pointer-events: all; cursor: nwse-resize; }
+
+.psv-freetext-editor {
+  position: absolute; z-index: 4; padding: 4px; line-height: 1.2; resize: both;
+  font-family: Helvetica, Arial, sans-serif; background: #fffbe6; border: 1px dashed var(--psv-accent); outline: none;
+}
+
+.psv-note {
+  position: absolute; z-index: 5; width: 220px; background: #fff; border: 1px solid var(--psv-border);
+  border-radius: 8px; box-shadow: 0 6px 20px rgba(15, 23, 42, 0.18); padding: 8px; display: flex; flex-direction: column; gap: 6px;
+}
+.psv-note-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 12px; color: var(--psv-muted); }
+.psv-note-head button { border: 0; background: none; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.psv-note textarea { width: 100%; min-height: 70px; resize: vertical; border: 1px solid var(--psv-border); border-radius: 6px; padding: 6px; font: inherit; }
+.psv-note p { margin: 0; white-space: pre-wrap; }
+.psv-note-foot { display: flex; justify-content: flex-end; gap: 6px; }
+.psv-note-foot button { border: 1px solid var(--psv-border); background: #fff; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-weight: 600; }
+.psv-note-foot button.primary { background: var(--psv-accent); border-color: var(--psv-accent); color: #fff; }
+
+/* ---------- Zoom ---------- */
+.psv-zoom {
+  position: absolute; right: 12px; bottom: 12px; z-index: 1; display: flex; align-items: center;
+  background: #fff; border: 1px solid var(--psv-border); border-radius: 999px; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); overflow: hidden;
+}
+.psv-zoom button { border: 0; background: none; height: 30px; min-width: 32px; padding: 0 8px; cursor: pointer; font-weight: 700; font-size: 15px; }
+.psv-zoom .psv-zoom-value { font-size: 12px; min-width: 52px; border-inline: 1px solid var(--psv-border); }
+.psv-zoom button:hover { background: rgba(26, 53, 129, 0.08); }
+
+/* ---------- Overlays (same look as the PDFTron package) ---------- */
+.psv-overlay {
+  position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 16px; text-align: center; background: rgba(246, 248, 252, 0.92);
+  font-size: 13px; font-weight: 700; color: var(--psv-muted);
+}
+.psv-overlay.psv-error { z-index: 7; background: rgba(246, 248, 252, 0.96); }
+.psv-progress { width: 180px; height: 6px; border-radius: 999px; background: rgba(31, 42, 76, 0.1); overflow: hidden; }
+.psv-progress > span { display: block; height: 100%; border-radius: 999px; background: var(--psv-accent); transition: width 200ms ease; }
+.psv-stalled { font-size: 12px; font-weight: 600; }
+.psv-link { border: 0; background: none; padding: 0; color: var(--psv-ink); font-weight: 800; text-decoration: underline; cursor: pointer; }
+.psv-retry { border-radius: 8px; border: 1px solid rgba(31, 42, 76, 0.16); background: #fff; padding: 6px 12px; font-size: 12px; font-weight: 800; color: var(--psv-ink); cursor: pointer; }
+
+@media print { .psv-view { display: none; } }

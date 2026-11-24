@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xfdf xmlns="http://ns.adobe.com/xfdf/" xml:space="preserve">
+  <pdf-info xmlns="http://www.pdftron.com/pdfinfo" version="2" import-version="4" />
+  <fields>
+    <field name="student"><value>Jane Doe</value></field>
+  </fields>
+  <annots>
+    <ink page="0" rect="98.5,598.5,201.5,661.5" color="#E44234" flags="print" name="f-ink-1" title="Reviewer" subject="Free Hand" date="D:20260115103000+05'30'" width="3" opacity="1" creationdate="D:20260115102900+05'30'">
+      <trn-custom-data bytes="{}"/>
+      <inklist><gesture>100,600;130,640;160,610;200,660</gesture><gesture>100,620;200,620</gesture></inklist>
+    </ink>
+    <freetext page="0" rect="300,700,500,730" flags="print" name="f-ft-1" title="Reviewer" subject="Free Text" date="D:20260115103100+05'30'" width="0" creationdate="D:20260115103100+05'30'" TextColor="#E44234" FontSize="16">
+      <trn-custom-data bytes="{&quot;trn-wrapped-text-lines&quot;:&quot;[]&quot;}"/>
+      <contents>Good work! अच्छा</contents>
+      <contents-richtext><body xmlns="http://www.w3.org/1999/xhtml" xmlns:xfa="http://www.xfa.org/schema/xfa-data/1.0/"><p><span>Good work! अच्छा</span></p></body></contents-richtext>
+      <defaultappearance>0 0 0 RG /Helv 16 Tf</defaultappearance>
+      <defaultstyle>font: Helvetica 16pt; text-align: left; text-vertical-align: top; color: #E44234</defaultstyle>
+    </freetext>
+    <highlight page="0" rect="70,680,250,698" color="#FFFF00" flags="print" name="f-hl-1" title="Reviewer" subject="Highlight" date="D:20260115103200+05'30'" opacity="0.5" creationdate="D:20260115103200+05'30'" coords="70,698,250,698,70,680,250,680">
+      <trn-custom-data bytes="{}"/>
+    </highlight>
+    <squiggly page="0" rect="70,650,180,664" color="#00CC63" flags="print" name="f-sq-1" title="Reviewer" subject="Squiggly" date="D:20260115103200+05'30'" coords="70,664,180,664,70,650,180,650" />
+    <square page="0" rect="300,500,420,560" color="#E44234" flags="print" name="f-box-1" title="Reviewer" subject="Rectangle" date="D:20260115103300+05'30'" width="2" opacity="1" />
+    <circle page="0" rect="430,500,530,560" color="#1F6FEB" interior-color="#FFFFFF" flags="print" name="f-oval-1" title="Reviewer" subject="Ellipse" date="D:20260115103300+05'30'" width="2" />
+    <line page="0" rect="90,440,310,480" color="#E44234" flags="print" name="f-arrow-1" title="Reviewer" subject="Arrow" date="D:20260115103400+05'30'" width="2" start="100,450" end="300,470" head="None" tail="OpenArrow" />
+    <text page="0" rect="540,740,560,760" color="#FFCD45" flags="print,nozoom,norotate" name="f-note-1" title="Reviewer" subject="Note" date="D:20260115103500+05'30'" icon="Comment"><contents>Re-check question 4</contents></text>
+    <stamp page="0" rect="380,400,520,440" flags="print" name="f-stamp-1" title="Reviewer" subject="Approved" date="D:20260115103600+05'30'" icon="Approved" />
+    <stamp page="0" rect="380,300,540,360" flags="print" name="f-sig-1" title="Reviewer" subject="Signature" date="D:20260115103600+05'30'"><imagedata>data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAMCAYAAAADFL+5AAAAZklEQVR4nGNgGAVEABGNiv/INKUA2RxGUhTDwJsbHQT1EWMeyBwmUhTjcxQ5loNoRlItJyRHqllMpGogNTQImcVIimJSDSfGPCZyLScUEsSax0iu5dTKLUzUsBybXpLMolYBQ45ZACbWWtkOZU+tAAAAAElFTkSuQmCC</imagedata></stamp>
+    <polygon page="0" rect="100,200,200,280" color="#7C3AED" flags="print" name="f-poly-1" title="Reviewer" subject="Polygon" date="D:20260115103700+05'30'" width="1.5"><vertices>100,200;200,200;150,280</vertices></polygon>
+    <square page="0" rect="10,10,20,20" color="#000000" flags="hidden" name="f-hidden-1" title="Reviewer" subject="Rectangle" date="D:20260115103700+05'30'" width="1" />
+  </annots>
+  <pages><defmtx matrix="1,0,0,-1,0,792" /></pages>
+</xfdf>

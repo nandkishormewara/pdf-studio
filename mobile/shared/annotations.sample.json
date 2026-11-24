@@ -1,0 +1,320 @@
+{
+  "format": "pdf-studio-annotations",
+  "version": 2,
+  "file": "sample.pdf",
+  "annotations": [
+    {
+      "id": "hl000001",
+      "page": 0,
+      "kind": "highlight",
+      "color": "#ffd84d",
+      "opacity": 0.4,
+      "strokeWidth": 0,
+      "rects": [
+        {
+          "x": 56,
+          "y": 98.4,
+          "w": 312.5,
+          "h": 13.2
+        },
+        {
+          "x": 56,
+          "y": 114.4,
+          "w": 120,
+          "h": 13.2
+        }
+      ],
+      "comment": "Check this",
+      "status": "accepted",
+      "author": "Priya",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:32:44.000Z"
+    },
+    {
+      "id": "ul000002",
+      "page": 0,
+      "kind": "underline",
+      "color": "#e5484d",
+      "opacity": 1,
+      "strokeWidth": 1.5,
+      "rects": [
+        {
+          "x": 56,
+          "y": 140,
+          "w": 200,
+          "h": 13
+        }
+      ],
+      "status": "none",
+      "author": "Priya",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "so000003",
+      "page": 0,
+      "kind": "strikeout",
+      "color": "#e5484d",
+      "opacity": 1,
+      "strokeWidth": 1.5,
+      "rects": [
+        {
+          "x": 56,
+          "y": 160,
+          "w": 90,
+          "h": 13
+        }
+      ],
+      "status": "rejected",
+      "author": "Rahul",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "rc000004",
+      "page": 0,
+      "kind": "rect",
+      "color": "#e5484d",
+      "opacity": 1,
+      "strokeWidth": 2,
+      "rect": {
+        "x": 80,
+        "y": 460,
+        "w": 160,
+        "h": 100
+      },
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "el000005",
+      "page": 0,
+      "kind": "ellipse",
+      "color": "#1f6feb",
+      "opacity": 0.8,
+      "strokeWidth": 3,
+      "rect": {
+        "x": 300,
+        "y": 460,
+        "w": 120,
+        "h": 80
+      },
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "ln000006",
+      "page": 0,
+      "kind": "line",
+      "color": "#111111",
+      "opacity": 1,
+      "strokeWidth": 2,
+      "points": [
+        {
+          "x": 80,
+          "y": 600
+        },
+        {
+          "x": 300,
+          "y": 620
+        }
+      ],
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "ar000007",
+      "page": 0,
+      "kind": "arrow",
+      "color": "#e5484d",
+      "opacity": 1,
+      "strokeWidth": 2,
+      "points": [
+        {
+          "x": 320,
+          "y": 640
+        },
+        {
+          "x": 500,
+          "y": 580
+        }
+      ],
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "ik000008",
+      "page": 1,
+      "kind": "ink",
+      "color": "#7c3aed",
+      "opacity": 1,
+      "strokeWidth": 2.5,
+      "paths": [
+        [
+          {
+            "x": 100,
+            "y": 300
+          },
+          {
+            "x": 120,
+            "y": 280
+          },
+          {
+            "x": 150,
+            "y": 310
+          },
+          {
+            "x": 180,
+            "y": 270
+          }
+        ],
+        [
+          {
+            "x": 100,
+            "y": 340
+          },
+          {
+            "x": 200,
+            "y": 340
+          }
+        ]
+      ],
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "ft000009",
+      "page": 1,
+      "kind": "freetext",
+      "color": "#111111",
+      "opacity": 1,
+      "strokeWidth": 2,
+      "rect": {
+        "x": 100,
+        "y": 400,
+        "w": 220,
+        "h": 42
+      },
+      "text": "Reviewed by User3\nशुल्क जमा",
+      "fontSize": 14,
+      "comment": "Internal note",
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "nt000010",
+      "page": 1,
+      "kind": "note",
+      "color": "#ffd84d",
+      "opacity": 1,
+      "strokeWidth": 2,
+      "rect": {
+        "x": 520,
+        "y": 120,
+        "w": 22,
+        "h": 22
+      },
+      "comment": "Please confirm the fee amount",
+      "status": "completed",
+      "author": "Rahul",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "st000011",
+      "page": 1,
+      "kind": "stamp",
+      "color": "#e5484d",
+      "opacity": 1,
+      "strokeWidth": 2.5,
+      "rect": {
+        "x": 360,
+        "y": 480,
+        "w": 140,
+        "h": 34
+      },
+      "text": "APPROVED",
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "sg000012",
+      "page": 1,
+      "kind": "signature",
+      "color": "#000000",
+      "opacity": 1,
+      "strokeWidth": 2,
+      "rect": {
+        "x": 360,
+        "y": 600,
+        "w": 160,
+        "h": 60
+      },
+      "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAMCAYAAAADFL+5AAAAZklEQVR4nGNgGAVEABGNiv/INKUA2RxGUhTDwJsbHQT1EWMeyBwmUhTjcxQ5loNoRlItJyRHqllMpGogNTQImcVIimJSDSfGPCZyLScUEsSax0iu5dTKLUzUsBybXpLMolYBQ45ZACbWWtkOZU+tAAAAAElFTkSuQmCC",
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "ds000013",
+      "page": 1,
+      "kind": "distance",
+      "color": "#1f6feb",
+      "opacity": 1,
+      "strokeWidth": 1.5,
+      "points": [
+        {
+          "x": 100,
+          "y": 700
+        },
+        {
+          "x": 316,
+          "y": 700
+        }
+      ],
+      "measure": {
+        "factor": 0.013888888888888888,
+        "unit": "in",
+        "precision": 2
+      },
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    },
+    {
+      "id": "rd000014",
+      "page": 1,
+      "kind": "redact",
+      "color": "#e5484d",
+      "opacity": 1,
+      "strokeWidth": 1,
+      "rect": {
+        "x": 56,
+        "y": 60,
+        "w": 180,
+        "h": 16
+      },
+      "text": "John Doe",
+      "status": "none",
+      "author": "Me",
+      "createdAt": "2026-10-21T05:31:10.000Z",
+      "modifiedAt": "2026-10-21T05:31:10.000Z"
+    }
+  ]
+}

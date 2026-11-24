@@ -1,0 +1,27 @@
+{
+  "description": "What importing apryse-annots.xfdf (then apryse-commands.xfdf) onto a 2-page, 612x792, unrotated document must produce. Coordinates are page units (top-left origin). Every SDK checks these.",
+  "afterAnnots": {
+    "count": 11,
+    "byId": {
+      "f-ink-1":   {"kind": "ink", "color": "#e44234", "strokeWidth": 3, "author": "Reviewer", "firstPoint": [100, 192], "paths": 2},
+      "f-ft-1":    {"kind": "freetext", "color": "#e44234", "fontSize": 16, "text": "Good work! अच्छा", "rect": [300, 62, 200, 30]},
+      "f-hl-1":    {"kind": "highlight", "color": "#ffff00", "opacity": 0.45, "rect": [70, 94, 180, 18]},
+      "f-sq-1":    {"kind": "underline", "color": "#00cc63"},
+      "f-box-1":   {"kind": "rect", "rect": [300, 232, 120, 60], "strokeWidth": 2},
+      "f-oval-1":  {"kind": "ellipse", "color": "#1f6feb"},
+      "f-arrow-1": {"kind": "arrow", "firstPoint": [100, 342]},
+      "f-note-1":  {"kind": "note", "comment": "Re-check question 4"},
+      "f-stamp-1": {"kind": "stamp", "text": "APPROVED", "rect": [380, 352, 140, 40]},
+      "f-sig-1":   {"kind": "signature", "rect": [380, 432, 160, 60]},
+      "f-poly-1":  {"kind": "ink", "paths": 1, "pointsInFirstPath": 4}
+    },
+    "absent": ["f-hidden-1"],
+    "fields": {"student": "Jane Doe"}
+  },
+  "afterCommands": {
+    "count": 11,
+    "added": "c-box-1",
+    "removed": "f-oval-1",
+    "modified": {"id": "f-box-1", "rect": [310, 222, 120, 60], "strokeWidth": 4, "color": "#111111"}
+  }
+}

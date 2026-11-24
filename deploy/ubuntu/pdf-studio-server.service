@@ -1,0 +1,24 @@
+# systemd unit for the PDF Studio processing server. Installed by setup-server.sh.
+[Unit]
+Description=PDF Studio processing server
+After=network.target
+
+[Service]
+User=pdfstudio
+Group=pdfstudio
+WorkingDirectory=/opt/pdf-studio/server
+EnvironmentFile=/etc/pdf-studio/server.env
+ExecStart=/opt/pdf-studio/server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8787 --workers 2 --proxy-headers
+Restart=on-failure
+RestartSec=3
+# hardening: the server only needs its data folder and /tmp
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pdf-studio
+# LibreOffice needs a writable HOME for its profile
+Environment=HOME=/var/lib/pdf-studio
+
+[Install]
+WantedBy=multi-user.target

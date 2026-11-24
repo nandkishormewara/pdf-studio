@@ -1,0 +1,83 @@
+# Runs every test suite: web app, React viewer, server, iOS SDK and Android SDK.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web app and React viewer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            packages/react-viewer/package-lock.json
+      - name: Install
+        run: |
+          npm ci --no-audit --no-fund --prefix web
+          npm ci --no-audit --no-fund --prefix packages/react-viewer
+      - name: Web lint, translations and type-checked build
+        working-directory: web
+        run: |
+          npm run lint
+          npm run i18n:check
+          npm run build
+      - name: React viewer type check and tests
+        working-directory: packages/react-viewer
+        run: |
+          npm run typecheck
+          npm test
+
+  server:
+    name: Server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: server/requirements*.txt
+      - name: OCR and Office tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-hin libreoffice-impress libreoffice-writer
+      - run: pip install -r requirements-dev.txt
+        working-directory: server
+      - run: python -m pytest -q
+        working-directory: server
+
+  ios:
+    name: iOS SDK
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: swift test
+        working-directory: mobile/ios/PDFStudioKit
+
+  android:
+    name: Android SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Unit tests and library build
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon :pdfstudio:testDebugUnitTest :pdfstudio:assembleRelease
