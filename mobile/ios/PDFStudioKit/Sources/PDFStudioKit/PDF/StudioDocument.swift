@@ -31,7 +31,7 @@ public final class StudioDocument: ObservableObject {
         guard let pdf = PDFDocument(data: data) else { return nil }
         self.pdf = pdf
         self.name = name
-        importExisting()
+        importExisting(names: AnnotationNames(data: data))
     }
 
     public convenience init?(url: URL) {
@@ -125,12 +125,18 @@ public final class StudioDocument: ObservableObject {
     // MARK: - Import / export
 
     /// Moves annotations we can edit from the file into the model (like the web SDK).
-    private func importExisting() {
+    private func importExisting(names: AnnotationNames) {
+        var names = names
         var found: [Annotation] = []
         for i in 0..<pdf.pageCount {
             guard let page = pdf.page(at: i) else { continue }
             let g = geometry(page: i)
             for annot in page.annotations where annot.type != "Popup" {
+                // PDFKit before 27 drops /NM on read: put back the id the file has, so marks keep matching
+                // the web, Android and XFDF copies.
+                if annot.value(forAnnotationKey: .name) == nil, let nm = names.name(for: annot, page: i) {
+                    annot.setValue(nm, forAnnotationKey: .name)
+                }
                 guard let a = AnnotationBridge.annotation(from: annot, page: i, geometry: g) else { continue }
                 // A popup can share its parent's keys; never import the same annotation twice.
                 if found.contains(where: { $0.id == a.id }) { page.removeAnnotation(annot); continue }

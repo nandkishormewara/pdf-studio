@@ -65,8 +65,15 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
-      - run: swift test
+      - name: Tests on macOS
+        run: swift test
         working-directory: mobile/ios/PDFStudioKit
+      - name: Tests on an iPhone simulator
+        working-directory: mobile/ios/PDFStudioKit
+        run: |
+          id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k in sorted(d, reverse=True) if "iOS" in k for x in d[k] if x["name"].startswith("iPhone")))')
+          xcrun simctl list devices available | grep "$id"
+          xcodebuild test -scheme PDFStudioKit -destination "platform=iOS Simulator,id=$id" -quiet
 
   android:
     name: Android SDK

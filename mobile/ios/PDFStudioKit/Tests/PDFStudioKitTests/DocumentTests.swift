@@ -42,16 +42,8 @@ final class DocumentTests: XCTestCase {
         XCTAssertEqual(kinds, [.highlight, .underline, .strikeout, .rect, .ellipse, .line, .arrow, .ink, .freetext, .note])
 
         let original = Dictionary(uniqueKeysWithValues: try sample().map { ($0.id, $0) })
-        // Known issue: PDFKit before macOS 27 / iOS 27 does not return /NM when it reads a file back,
-        // so ids of marks from other apps are lost there. Only that check is expected to fail on those systems;
-        // geometry and text are still checked, matching by kind (each kind appears once in the sample).
-        let pdfKitReadsNM = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
         for a in foreign.annotations {
-            if original[a.id] == nil {
-                let message = "\(a.kind) id \(a.id) not preserved via /NM"
-                if pdfKitReadsNM { XCTFail(message) } else { XCTExpectFailure("PDFKit before 27 doesn't read /NM back") { XCTFail(message) } }
-            }
-            let o = try XCTUnwrap(original[a.id] ?? original.values.first { $0.kind == a.kind }, "no \(a.kind) in the sample")
+            let o = try XCTUnwrap(original[a.id], "\(a.kind) id \(a.id) not preserved via /NM; got \(foreign.annotations.map { "\($0.kind):\($0.id)" })")
             let (ab, ob) = (a.bounds, o.bounds)
             for (x, y, w) in [(ab.x, ob.x, "x"), (ab.y, ob.y, "y"), (ab.w, ob.w, "w"), (ab.h, ob.h, "h")] {
                 assertClose(x, y, 1.5, "\(a.kind) \(w)")
@@ -60,6 +52,25 @@ final class DocumentTests: XCTestCase {
         let ft = try XCTUnwrap(foreign.annotations.first { $0.kind == .freetext })
         XCTAssertEqual(ft.text, "Reviewed by User3\nशुल्क जमा")
         XCTAssertEqual(foreign.annotations.first { $0.kind == .note }?.comment, "Please confirm the fee amount")
+    }
+
+    /// PDFKit before 27 doesn't return /NM on read; the ids must come from the file itself.
+    func testAnnotationNamesAreSavedAndReadFromTheFile() throws {
+        let doc = try XCTUnwrap(StudioDocument(data: Fixtures.pdf(), name: "t.pdf"))
+        try doc.importJSON(Fixtures.data("annotations.sample.json"))
+        let data = try XCTUnwrap(doc.pdfData())
+        var names = AnnotationNames(data: data)
+        XCTAssertFalse(names.isEmpty, "no /NM written to the file")
+        let plain = try XCTUnwrap(PDFDocument(data: data))
+        var found: Set<String> = []
+        for i in 0..<plain.pageCount {
+            for a in plain.page(at: i)!.annotations where a.type != "Popup" {
+                if let n = names.name(for: a, page: i) { found.insert(n) }
+            }
+        }
+        for id in ["hl000001", "ul000002", "rc000004", "ik000008", "ft000009", "nt000010"] {
+            XCTAssertTrue(found.contains(id), "\(id) missing; found \(found.sorted())")
+        }
     }
 
     func testRotatedAndCroppedPagesKeepGeometry() throws {
