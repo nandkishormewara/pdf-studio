@@ -16,6 +16,8 @@ All notable changes are listed here. The project follows [semantic versioning](h
 - Apply redactions through a PDF Studio server: `PDFStudioServer`, `StudioDocument.applyRedactions(using:)` and an
   *Apply* action in the editor when a server is configured.
 - Marks drawn by PDF Studio stay upright on rotated and cropped pages in page thumbnails too.
+- Flattened saves now contain stamps, signatures and measurements (PDFKit's burn-in dropped them) and keep the
+  styling of rich text boxes; the marks are drawn into the page as vector graphics and real text.
 
 ### Android
 - Viewer tools: oval, line, arrow, text box and sticky note next to pen, highlighter and box, with a colour row.

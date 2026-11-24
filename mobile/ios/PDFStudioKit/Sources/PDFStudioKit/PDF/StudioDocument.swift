@@ -226,12 +226,52 @@ public final class StudioDocument: ObservableObject {
         case .editable:
             return pdf.dataRepresentation().map(AnnotationNames.restoringNames(in:))
         case .flattened:
+            // PDFKit's burn-in never calls our `draw`: it drops stamp-type marks and redraws free text from its own
+            // contents. So the marks we draw ourselves are taken out, the rest is burned in by PDFKit, and each page
+            // that had our marks is rebuilt with Core Graphics: its flattened content, then our marks on top.
+            let drawn: [(PDFPage, StudioDrawnAnnotation)] = annotations.compactMap { a in
+                guard let annot = live[a.id] as? StudioDrawnAnnotation, let page = annot.page else { return nil }
+                return (page, annot)
+            }
+            for (page, annot) in drawn { page.removeAnnotation(annot) }
+            defer { for (page, annot) in drawn { page.addAnnotation(annot) } }
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
             defer { try? FileManager.default.removeItem(at: url) }
-            guard pdf.write(to: url, withOptions: [.burnInAnnotationsOption: true]) else { return nil }
-            return try? Data(contentsOf: url)
+            guard pdf.write(to: url, withOptions: [.burnInAnnotationsOption: true]), let burned = try? Data(contentsOf: url) else { return nil }
+            if drawn.isEmpty { return burned }
+            return Self.drawing(drawn.map { (pdf.index(for: $0.0), $0.1) }, onto: burned)
         }
     }
+
+    /// [flattened] with each mark drawn into its page (0-based index). Pages without marks are left as they are.
+    private static func drawing(_ marks: [(Int, StudioDrawnAnnotation)], onto flattened: Data) -> Data? {
+        guard let out = PDFDocument(data: flattened),
+              let provider = CGDataProvider(data: flattened as CFData), let source = CGPDFDocument(provider) else { return nil }
+        for (index, group) in Dictionary(grouping: marks, by: { $0.0 }) {
+            guard let cgPage = source.page(at: index + 1), let old = out.page(at: index) else { continue }
+            var media = cgPage.getBoxRect(.mediaBox)
+            let buffer = NSMutableData()
+            guard let consumer = CGDataConsumer(data: buffer), let ctx = CGContext(consumer: consumer, mediaBox: &media, nil) else { return nil }
+            ctx.beginPDFPage(nil)
+            ctx.drawPDFPage(cgPage)
+            for (_, annot) in group {
+                annot.drawsInUserSpace = true
+                annot.draw(with: .mediaBox, in: ctx)
+                annot.drawsInUserSpace = false
+            }
+            ctx.endPDFPage()
+            ctx.closePDF()
+            guard let page = PDFDocument(data: buffer as Data)?.page(at: 0) else { return nil }
+            // keep what the page box, rotation and remaining annotations (links) were
+            for box in [PDFDisplayBox.cropBox, .bleedBox, .trimBox, .artBox] { page.setBounds(old.bounds(for: box), for: box) }
+            page.rotation = old.rotation
+            for a in old.annotations { old.removeAnnotation(a); page.addAnnotation(a) }
+            out.removePage(at: index)
+            out.insert(page, at: index)
+        }
+        return out.dataRepresentation()
+    }
+
 
     // MARK: - Redaction (server)
 

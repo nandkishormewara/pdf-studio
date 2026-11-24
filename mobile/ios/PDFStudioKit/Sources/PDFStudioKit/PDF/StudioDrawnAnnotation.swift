@@ -9,12 +9,15 @@ import PDFKit
 final class StudioDrawnAnnotation: PDFAnnotation {
     var model: Annotation!
     var geometry: PageGeometry!
+    /// Set while StudioDocument draws this mark into a page it rebuilds for a flattened save: the context is plain
+    /// PDF user space, whatever its size.
+    var drawsInUserSpace = false
 
     override func draw(with box: PDFDisplayBox, in context: CGContext) {
         guard let a = model, let g = geometry else { return }
         context.saveGState()
         defer { context.restoreGState() }
-        if Self.expectsDisplaySpace(context, g) { context.concatenate(g.displayTransform) }
+        if !drawsInUserSpace && Self.expectsDisplaySpace(context, g) { context.concatenate(g.displayTransform) }
         context.setAlpha(a.opacity)
         let color = CGColor(srgbRed: RGB(hex: a.color).r, green: RGB(hex: a.color).g, blue: RGB(hex: a.color).b, alpha: 1)
 
