@@ -26,7 +26,7 @@ open ../Demo/PDFStudioDemo.xcodeproj      # then Run on an iPhone or iPad simula
 
 ### Add to an app
 
-*File ▸ Add Package Dependencies… ▸ Add Local…* → `mobile/ios/PDFStudioKit`. Or host the package in a Git repository and add it by URL, pinned to a tag. No licence key and no initialisation call are needed.
+*File ▸ Add Package Dependencies…* → `https://github.com/nandkishormewara/pdf-studio`, pinned to a release tag (for example `from: "1.0.0"`). To work on the SDK itself, use *Add Local…* → `mobile/ios/PDFStudioKit`. No licence key and no initialisation call are needed.
 
 ```swift
 import PDFStudioKit

@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest something PDF Studio should do
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part?
+      multiple: true
+      options: [Web app, React viewer, iOS SDK, Android SDK, Server, Docs]
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem or use case, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could it work?
+  - type: textarea
+    id: compat
+    attributes:
+      label: Coming from another SDK?
+      description: If this replaces a call in Apryse / PDFTron, PDF.js or another library, name it.

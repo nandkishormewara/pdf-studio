@@ -15,7 +15,7 @@ cd ios/PDFStudioKit && swift test          # 17 tests: geometry, JSON, PDF round
 open ../Demo/PDFStudioDemo.xcodeproj       # run on a simulator
 ```
 
-Add to an app: *File ▸ Add Package Dependencies… ▸ Add Local…* → `mobile/ios/PDFStudioKit`
+Add to an app: *File ▸ Add Package Dependencies…* → `https://github.com/nandkishormewara/pdf-studio` (or *Add Local…* → `mobile/ios/PDFStudioKit` to work on the SDK)
 (or host it in a Git repo and add by URL).
 
 ### Read-only viewer with reviewer markup (replaces a read-only `PTDocumentController`)

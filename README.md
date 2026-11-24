@@ -78,7 +78,15 @@ import { PdfWebViewer } from '@pdf-studio/react-viewer';
 
 ### iOS (Swift Package Manager)
 
-Add `mobile/ios/PDFStudioKit` as a package dependency, then:
+In Xcode choose **File → Add Package Dependencies…** and enter
+`https://github.com/nandkishormewara/pdf-studio`, or in `Package.swift`:
+
+```swift
+.package(url: "https://github.com/nandkishormewara/pdf-studio", from: "1.0.0")
+// target dependency: .product(name: "PDFStudioKit", package: "pdf-studio")
+```
+
+Then:
 
 ```swift
 import PDFStudioKit
@@ -90,7 +98,23 @@ PDFStudioViewer(document: doc)      // SwiftUI
 
 ### Android
 
-Include the `mobile/android/pdfstudio` module (or build its AAR), then:
+Download `pdfstudio-release.aar` from the [latest release](https://github.com/nandkishormewara/pdf-studio/releases/latest),
+put it in your app's `libs/` folder and add it with its dependencies (an AAR doesn't carry them):
+
+```kotlin
+dependencies {
+    implementation(files("libs/pdfstudio-release.aar"))
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
+    implementation(platform("androidx.compose:compose-bom:2025.12.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.11.0")
+}
+```
+
+Or include the `mobile/android/pdfstudio` module from source. Then:
 
 ```kotlin
 PdfStudioViewer.open(context, uri, ViewerConfig(title = "Document", xfdfLayers = listOf(savedXfdf)))
@@ -117,10 +141,18 @@ SDK calls and the server features to their PDF Studio equivalents, and explains 
 
 | Part | Command |
 |---|---|
+| Web app | `cd web && npm run lint && npm run build` |
 | React component + shared web SDK checks | `cd packages/react-viewer && npm test` |
 | iOS | `cd mobile/ios/PDFStudioKit && swift test` |
 | Android | `cd mobile/android && ./gradlew :pdfstudio:testDebugUnitTest` |
 | Server | `cd server && python -m pytest` |
+
+All of them run on every push and pull request ([Tests workflow](.github/workflows/tests.yml)).
+
+## Contributing
+
+Bug reports, fixes and features are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems
+privately as described in [SECURITY.md](SECURITY.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 
