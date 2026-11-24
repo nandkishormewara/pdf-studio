@@ -499,9 +499,21 @@ the same.
 
 ### Non-Latin text
 
-The standard PDF fonts only cover WinAnsi (Latin-1). Text outside that range in text boxes and
-stamps is rendered by the browser, which shapes Devanagari, Arabic, CJK and emoji correctly, onto a
-4×-resolution PNG and embedded as an image. Latin text stays real, selectable PDF text.
+The standard PDF fonts only cover WinAnsi (Latin-1). For other text in text boxes and stamps:
+
+- **Shaped text (`unicodeText.ts`):** when a `TextShaper` is plugged in with `setTextShaper`, each line is split into
+  Latin runs (Helvetica, as before) and runs the shaper covers. Those are shaped (glyph ids, advances and mark
+  offsets) and written as real text in an embedded TrueType font: Type0 / CIDFontType2, Identity-H, with a
+  CIDToGIDMap. Each glyph-and-text pair gets its own character code, so the ToUnicode map says exactly what every
+  drawn glyph reads as (a cluster's characters are spread over its glyphs in drawing order); each run is also wrapped
+  in an `/ActualText` span. PDF.js and PDFium read the text back exactly, including vowel signs drawn before their
+  consonant. The font file is embedded once per document, at the end of `writeAnnotations`.
+- **The web app's shaper (`hbShaper.ts`, registered in `main.tsx`):** HarfBuzz (harfbuzzjs, MIT) with Noto Sans
+  Devanagari Regular and Bold (OFL). The wasm and fonts are loaded the first time a mark with non-Latin text is
+  saved. The React viewer package registers no shaper, so its output is unchanged unless the host app calls
+  `setTextShaper`.
+- **Fallback:** without a shaper, or when the font lacks a character (Arabic, CJK, emoji), the text is rendered by
+  the browser onto a 4×-resolution PNG and embedded as an image, as before.
 
 #### Rich text
 
@@ -509,7 +521,8 @@ A text box may carry `richText: TextRun[]` (`{text, bold?, italic?, underline?, 
 `text` always holds the plain text, so tools that ignore rich text still work.
 
 - **Appearance:** Latin runs are drawn as real text in Helvetica, Helvetica-Bold, -Oblique and -BoldOblique, with
-  underlines as strokes. If any run is non-Latin, the whole box becomes one image (`renderRichTextImage`).
+  underlines as strokes. Non-Latin runs are shaped as above (bold uses the bold font; italic has no Devanagari face
+  and is drawn upright). If the shaper can't cover a run, the whole box becomes one image (`renderRichTextImage`).
 - **PDF:** `/RC` holds an XHTML body (`<p><span style="font-weight:bold;color:#…">`) in the form Acrobat and Apryse
   write; `/Contents` holds the plain text. On import `/RC` is parsed back; colours equal to the box colour are dropped.
 - **XFDF:** the same XHTML body inside `<contents-richtext>`, next to `<contents>`.

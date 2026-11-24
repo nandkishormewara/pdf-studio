@@ -16,8 +16,8 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const project = path.resolve(process.argv[2] ?? path.join(here, '..'));
 const out = path.resolve(process.argv[3] ?? path.join(project, 'public', 'THIRD-PARTY-NOTICES.txt'));
-const ALLOWED = /^(MIT|ISC|0BSD|BSD-2-Clause|BSD-3-Clause|Apache-2\.0|Zlib|MIT-0|BlueOak-1\.0\.0|Unlicense|CC0-1\.0|Python-2\.0|\(MIT AND Zlib\)|\(MIT OR Apache-2\.0\)|\(Apache-2\.0 OR MIT\))$/;
-const LICENSE_FILE = /^(licen[cs]e|copying)(\.(md|txt))?$/i;
+const ALLOWED = /^(MIT|ISC|0BSD|BSD-2-Clause|BSD-3-Clause|Apache-2\.0|Zlib|MIT-0|BlueOak-1\.0\.0|Unlicense|CC0-1\.0|Python-2\.0|\(MIT AND Zlib\)|\(MIT OR Apache-2\.0\)|\(Apache-2\.0 OR MIT\)|OFL-1\.1|MIT AND OFL-1\.1)$/;
+const LICENSE_FILE = /^(licen[cs]e|copying)(_font)?(\.(md|txt))?$/i; // LICENSE_FONT: a font's OFL next to its code's licence
 const NOTICE_FILE = /^notice(\.(md|txt))?$/i;
 
 // Packages whose package.json has no licence field, checked by hand. Add one only after reading the package's own licence.
@@ -42,7 +42,9 @@ function walk(name, from) {
   try {
     dir = path.dirname(createRequire(path.join(from, 'noop.js')).resolve(`${name}/package.json`));
   } catch {
-    return; // optional dependency not installed on this platform
+    // Packages whose "exports" hide package.json (harfbuzzjs): look for the folder on the usual module paths.
+    dir = createRequire(path.join(from, 'noop.js')).resolve.paths(name)?.map((p) => path.join(p, name)).find((d) => fs.existsSync(path.join(d, 'package.json')));
+    if (!dir) return; // optional dependency not installed on this platform
   }
   if (seen.has(dir)) return;
   const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));

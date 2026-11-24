@@ -14,6 +14,7 @@ import type { PageViewport } from 'pdfjs-dist';
 import { arrowHead, ellipsePoints, hexToRgb01, normRect, rectPoints, textBox, textLayoutBox, textOrigin, uid } from './geometry';
 import { labelAnchor, measureLabel } from './measure';
 import { dataUrlToBytes, isLatin, renderRichTextImage, renderTextImage } from './textImage';
+import { EmbeddedFonts, getTextShaper, glyphHex, placeGlyphs, scriptRuns, textHex, type TextShaper } from './unicodeText';
 import { isPlainRuns, plainText, relativeTo, runsToLines, runsToXhtml, xhtmlToRuns } from './richtext';
 import type { TextRun } from './richtext';
 import type { Annotation, Pt, Rect } from './types';
@@ -67,6 +68,80 @@ interface Env {
   helvBold: PDFFont;
   helvItalic: PDFFont;
   helvBoldItalic: PDFFont;
+  /** shapes non-Latin text into real PDF text; null → such text is drawn as an image */
+  shaper: TextShaper | null;
+  fonts: EmbeddedFonts;
+}
+
+/** A styled piece of one line of text. */
+interface Piece { text: string; bold?: boolean; italic?: boolean; underline?: boolean; color: string }
+
+/**
+ * Writes lines of styled pieces as real text: Latin runs in Helvetica, other scripts shaped into the embedded Unicode
+ * font. Returns the drawn size, or null (nothing written) when there is no shaper or the font lacks a character.
+ */
+function drawShapedLines(env: Env, b: Built, lines: Piece[][], topLeft: Pt, size: number): { w: number; h: number } | null {
+  const shaper = env.shaper;
+  if (!shaper) return null;
+  type Item =
+    | { latin: true; piece: Piece; text: string; font: PDFFont; name: string; w: number }
+    | { latin: false; piece: Piece; text: string; placed: NonNullable<ReturnType<typeof placeGlyphs>>; w: number };
+  const helvFace = (p: Piece): [PDFFont, string] =>
+    p.bold ? (p.italic ? [env.helvBoldItalic, 'HelvBI'] : [env.helvBold, 'HelvB']) : p.italic ? [env.helvItalic, 'HelvI'] : [env.helv, 'Helv'];
+  const laid: Item[][] = [];
+  for (const line of lines) {
+    const items: Item[] = [];
+    for (const piece of line) {
+      for (const run of scriptRuns(piece.text)) {
+        if (run.latin) {
+          const [font, name] = helvFace(piece);
+          items.push({ latin: true, piece, text: run.text, font, name, w: font.widthOfTextAtSize(run.text, size) });
+        } else {
+          const placed = placeGlyphs(piece.bold ? shaper.bold : shaper.regular, run.text, size);
+          if (!placed) return null;
+          items.push({ latin: false, piece, text: run.text, placed, w: placed.width });
+        }
+      }
+    }
+    laid.push(items);
+  }
+  const toPdf = (p: Pt): Pt => { const [x, y] = env.vp.convertToPdfPoint(p.x, p.y); return { x, y }; };
+  let maxW = 0;
+  laid.forEach((items, li) => {
+    const baseline = topLeft.y + size * (li + 0.85) + size * 0.15 * li;
+    let x = topLeft.x;
+    for (const it of items) {
+      const color = rgbOp(it.piece.color, false);
+      if (it.latin) {
+        b.resources.Font[it.name] = it.font.ref;
+        const { o, u, v } = basis(env.vp, { x, y: baseline });
+        b.content.push(`BT /${it.name} ${f(size)} Tf ${color} ${f(u.x)} ${f(u.y)} ${f(v.x)} ${f(v.y)} ${f(o.x)} ${f(o.y)} Tm ${hexText(it.text)} Tj ET`);
+      } else {
+        const { name, ref, codes } = env.fonts.use(it.placed.font, it.placed.glyphs);
+        b.resources.Font[name] = ref;
+        // Each glyph at its shaped position (marks carry their own offsets); text space is page units here.
+        const ops: string[] = [];
+        let px = 0, py = 0;
+        it.placed.glyphs.forEach((g, i) => {
+          ops.push(`${f(g.x - px)} ${f(g.dy - py)} Td ${glyphHex([codes[i]])} Tj`);
+          px = g.x; py = g.dy;
+        });
+        const { o, u, v } = basis(env.vp, { x, y: baseline });
+        // ActualText gives readers the exact text of the run (copy, search), whatever the glyph order.
+        b.content.push(`/Span <</ActualText ${textHex(it.text)}>> BDC BT /${name} ${f(size)} Tf ${color} ${f(u.x)} ${f(u.y)} ${f(v.x)} ${f(v.y)} ${f(o.x)} ${f(o.y)} Tm ${ops.join(' ')} ET EMC`);
+      }
+      if (it.piece.underline) {
+        const y = baseline + size * 0.12;
+        const p1 = toPdf({ x, y }), p2 = toPdf({ x: x + it.w, y });
+        b.content.push(`${rgbOp(it.piece.color, true)} ${f(Math.max(0.6, size / 16))} w ${f(p1.x)} ${f(p1.y)} m ${f(p2.x)} ${f(p2.y)} l S`);
+      }
+      x += it.w;
+    }
+    maxW = Math.max(maxW, x - topLeft.x);
+  });
+  const h = lines.length * size * 1.15;
+  b.points.push(...rectPoints({ x: topLeft.x, y: topLeft.y, w: maxW, h }).map(toPdf));
+  return { w: maxW, h };
 }
 
 /** Affine basis for drawing upright (as displayed) content at a page-unit origin. */
@@ -95,7 +170,9 @@ async function drawText(
     b.points.push(...rectPoints({ x: topLeft.x, y: topLeft.y, w, h }).map(toPdf));
     return { w, h };
   }
-  // Non-Latin scripts: embed text rendered by the browser as an image.
+  // Non-Latin scripts: real text when a shaper is plugged in and covers it, otherwise an image rendered by the browser.
+  const shaped = drawShapedLines(env, b, text.split('\n').map((l) => [{ text: l, bold, color }]), topLeft, size);
+  if (shaped) return shaped;
   const img = await renderTextImage(text, size, color, bold);
   const embedded = await env.doc.embedPng(img.png);
   const name = `Im${Object.keys(b.resources.XObject).length}`;
@@ -108,6 +185,8 @@ async function drawText(
 async function drawRichText(env: Env, b: Built, runs: TextRun[], topLeft: Pt, size: number, baseColor: string) {
   const toPdf = (p: Pt): Pt => { const [x, y] = env.vp.convertToPdfPoint(p.x, p.y); return { x, y }; };
   if (!isLatin(plainText(runs))) {
+    const pieces = runsToLines(runs).map((line) => line.map((r) => ({ ...r, color: r.color ?? baseColor })));
+    if (drawShapedLines(env, b, pieces, topLeft, size)) return;
     const img = await renderRichTextImage(runs, size, baseColor);
     const embedded = await env.doc.embedPng(img.png);
     const name = `Im${Object.keys(b.resources.XObject).length}`;
@@ -342,6 +421,9 @@ export async function writeAnnotations(doc: PDFDocument, viewports: PageViewport
   const pages = doc.getPages();
   const ctx = doc.context;
   let n = 0;
+  const needsShaping = annotations.some((a) => [a.text, a.comment, ...(a.richText ?? []).map((r) => r.text)].some((t) => t && !isLatin(t)));
+  const shaper = needsShaping ? await getTextShaper() : null;
+  const fonts = new EmbeddedFonts(ctx);
 
   for (const a of annotations) {
     const page = pages[a.page];
@@ -349,7 +431,7 @@ export async function writeAnnotations(doc: PDFDocument, viewports: PageViewport
     if (!page || !vp) continue;
     // Redaction marks are instructions, never page content; they travel as /Redact annotations.
     if (a.kind === 'redact' && opts.mode === 'flatten') continue;
-    const env: Env = { doc, vp, helv, helvBold, helvItalic, helvBoldItalic };
+    const env: Env = { doc, vp, helv, helvBold, helvItalic, helvBoldItalic, shaper, fonts };
     const built = await buildAppearance(env, a);
     const bbox = bboxOf(built.points, a.strokeWidth / 2 + 2);
     const res: Record<string, unknown> = {};
@@ -368,6 +450,7 @@ export async function writeAnnotations(doc: PDFDocument, viewports: PageViewport
     }
     page.node.addAnnot(ctx.register(annotationDict(doc, page, vp, a, bbox, ap)));
   }
+  fonts.finish();
 }
 
 function annotationDict(doc: PDFDocument, page: PDFPage, vp: PageViewport, a: Annotation, bbox: number[], ap: PDFRef): PDFDict {

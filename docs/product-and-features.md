@@ -78,7 +78,7 @@ All parts use the same annotation data (JSON and XFDF) and the same coordinate s
 
 - **Annotations are real PDF annotations.** Saved files open with their marks in Acrobat, Chrome, Edge, Firefox and macOS Preview. PDF Studio also stores its own copy inside each annotation, so reopening in PDF Studio gives back exactly what was drawn.
 - **Annotations already in a file become editable** when it is opened, whether they were made in Acrobat, Chrome, Preview, Apryse or PDF Studio.
-- **Hindi and other scripts** are typed and shown correctly everywhere. In a saved file, non-Latin text in annotations is stored as a sharp picture of the text. It prints and displays correctly, but can't be selected (see §6).
+- **Hindi and other scripts** are typed and shown correctly everywhere. When the web app saves a file, Hindi (Devanagari) text in marks is real PDF text in an embedded Noto Sans Devanagari font: it can be selected, searched and copied, and flattened copies are searchable. Other non-Latin scripts (Arabic, CJK, emoji), and text saved by the mobile SDKs, are still stored as a sharp picture of the text: it prints and displays correctly but can't be selected (see §6).
 - **Rich text** in text boxes is saved in the same format Acrobat and Apryse use (`/RC` in the PDF, `contents-richtext` in XFDF).
 - **Redaction removes content.** Every page with a redaction mark is rebuilt as an image with the marked area painted out. The page's text, fonts and drawings are deleted from the file. Annotations and form fields under a mark are removed. Hidden information (title, author, metadata, scripts, attachments) can also be removed. Remaining text can be recognised again so the page stays searchable.
 - **Digital signatures** are PAdES (the European / Adobe standard for PDF signatures), made with the server's certificate. Until the organisation's own certificate is installed, the server uses a *development certificate*, which other readers show as "not trusted" ([server and deployment](server-and-deployment.md#7-signing-certificates)).
@@ -121,7 +121,7 @@ Measured on test files (26 Oct 2026, Mac): text from the 300-page file in 0.5 s 
 
 | Area | Limitation | Possible fix |
 |---|---|---|
-| Non-Latin text in saved annotations | Saved as a picture, not selectable or searchable | Embed a font subset with HarfBuzz shaping |
+| Non-Latin text in saved annotations | Web: Hindi (Devanagari) is real, searchable text (HarfBuzz + embedded Noto Sans Devanagari, about 220 KB per weight used). Other scripts, and the iOS and Android SDKs, still save a picture | Add fonts for more scripts (Arabic needs right-to-left runs); port to the mobile SDKs; subset the embedded font |
 | Non-Latin form values | Saved correctly but drawn by the reader (`NeedAppearances`); such forms can't be flattened | Same |
 | Encrypted PDFs | View, annotate and print only; no saving, redaction or signing | Decrypt on the server with the owner's password |
 | Editing a signed PDF | Saving rewrites the file and breaks earlier signatures (the app warns) | Incremental save of annotations |

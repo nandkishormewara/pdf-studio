@@ -4,6 +4,12 @@ All notable changes are listed here. The project follows [semantic versioning](h
 
 ## Unreleased
 
+### Web
+- Hindi (Devanagari) in saved marks is real PDF text instead of a picture: shaped with HarfBuzz and written in an
+  embedded Noto Sans Devanagari font with a ToUnicode map, so it can be selected, searched and copied, and flattened
+  copies are searchable. Other scripts still fall back to a picture. The SDK's `setTextShaper` lets host apps plug
+  in the same shaper.
+
 ### Android
 - Viewer tools: oval, line, arrow, text box and sticky note next to pen, highlighter and box, with a colour row.
 - Tap a mark to see its author and date, comment on it, set its review status or delete it; Undo covers every change.
