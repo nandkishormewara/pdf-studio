@@ -19,10 +19,16 @@ FONT_CANDIDATES = [
     "/System/Library/Fonts/Helvetica.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 ]
+# Linux fonts with Devanagari (DejaVu has none): fonts-noto-core or fonts-lohit-deva.
+DEVANAGARI_FONTS = [
+    "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+    "/usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf",
+]
 
 
-def _font(size: int):
-    for path in FONT_CANDIDATES:
+def _font(size: int, text: str = ""):
+    devanagari = any("\u0900" <= ch <= "\u097f" for ch in text)
+    for path in (DEVANAGARI_FONTS if devanagari else []) + FONT_CANDIDATES:
         if Path(path).exists():
             return ImageFont.truetype(path, size)
     return ImageFont.load_default(size)
@@ -176,7 +182,7 @@ def scanned_pdf(text: str, rotate: int = 0) -> bytes:
     dpi = 200
     w, h = int(8.5 * dpi), int(11 * dpi)
     img = Image.new("RGB", (w, h), "white")
-    ImageDraw.Draw(img).multiline_text((150, 200), text, fill="black", font=_font(64), spacing=30)
+    ImageDraw.Draw(img).multiline_text((150, 200), text, fill="black", font=_font(64, text), spacing=30)
     jpeg = io.BytesIO()
     img.save(jpeg, format="JPEG", quality=92)
     pdf = pikepdf.new()

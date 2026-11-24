@@ -29,7 +29,7 @@ extension PlatformColor {
         guard let c = usingColorSpace(.sRGB) else { return nil }
         let (r, g, b, a) = (c.redComponent, c.greenComponent, c.blueComponent, c.alphaComponent)
         #endif
-        return (RGB(r: r, g: g, b: b), a)
+        return (RGB(r: r, g: g, b: b), Double(a))
     }
 }
 
