@@ -134,7 +134,8 @@ public final class StudioDocument: ObservableObject {
             for annot in page.annotations where annot.type != "Popup" {
                 // PDFKit before 27 drops /NM on read: put back the id the file has, so marks keep matching
                 // the web, Android and XFDF copies.
-                if annot.value(forAnnotationKey: .name) == nil, let nm = names.name(for: annot, page: i) {
+                if annot.value(forAnnotationKey: .name) == nil,
+                   let nm = (annot.value(forAnnotationKey: AnnotationBridge.nameCopyKey) as? String) ?? names.name(for: annot, page: i) {
                     annot.setValue(nm, forAnnotationKey: .name)
                 }
                 guard let a = AnnotationBridge.annotation(from: annot, page: i, geometry: g) else { continue }
@@ -219,7 +220,7 @@ public final class StudioDocument: ObservableObject {
         defer { for (page, annot) in marks { pdf.page(at: page)?.addAnnotation(annot) } }
         switch mode {
         case .editable:
-            return pdf.dataRepresentation()
+            return pdf.dataRepresentation().map(AnnotationNames.restoringNames(in:))
         case .flattened:
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
             defer { try? FileManager.default.removeItem(at: url) }

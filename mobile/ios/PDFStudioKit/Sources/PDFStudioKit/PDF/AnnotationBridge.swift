@@ -8,6 +8,11 @@ public enum AnnotationBridge {
     /// and the modification date it was written with.
     static let jsonKey = PDFAnnotationKey(rawValue: "/PDFStudio")
     static let jsonDateKey = PDFAnnotationKey(rawValue: "/PDFStudioM")
+    /// Copies of the id under keys PDFKit keeps, for systems whose PDFKit drops /NM (before 27):
+    /// `nameCopyKey` stays in the file for PDFKit-based readers; `nameSlotKey` (same length) is renamed to /NM
+    /// after saving (see `AnnotationNames.restoringNames(in:)`).
+    static let nameCopyKey = PDFAnnotationKey(rawValue: "/PDFStudioNM")
+    static let nameSlotKey = PDFAnnotationKey(rawValue: "/PDFStudioN0")
 
     /// Subtypes we can turn into editable model annotations when no JSON is present.
     static let importableTypes: Set<String> = ["Highlight", "Underline", "StrikeOut", "Square", "Circle", "Line", "Ink", "FreeText", "Text"]
@@ -125,6 +130,9 @@ public enum AnnotationBridge {
         guard let data = try? JSONEncoder().encode(a), let json = String(data: data, encoding: .utf8) else { return }
         annot.setValue(json, forAnnotationKey: jsonKey)
         annot.setValue(a.modifiedAt, forAnnotationKey: jsonDateKey)
+        annot.setValue(a.id, forAnnotationKey: .name)
+        annot.setValue(a.id, forAnnotationKey: nameCopyKey)
+        annot.setValue(a.id, forAnnotationKey: nameSlotKey)
     }
 
     private static func drawnBounds(_ a: Annotation, _ g: PageGeometry) -> CGRect {

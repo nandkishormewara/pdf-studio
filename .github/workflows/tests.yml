@@ -71,8 +71,8 @@ jobs:
       - name: Tests on an iPhone simulator
         working-directory: mobile/ios/PDFStudioKit
         run: |
-          id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k in sorted(d, reverse=True) if "iOS" in k for x in d[k] if x["name"].startswith("iPhone")))')
-          xcrun simctl list devices available | grep "$id"
+          read -r id runtime < <(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] + " " + k.rsplit(".", 1)[-1] for k in sorted(d, reverse=True) if "iOS" in k for x in d[k] if x["name"].startswith("iPhone")))')
+          echo "Simulator $id on $runtime"
           xcodebuild test -scheme PDFStudioKit -destination "platform=iOS Simulator,id=$id" -quiet
 
   android:

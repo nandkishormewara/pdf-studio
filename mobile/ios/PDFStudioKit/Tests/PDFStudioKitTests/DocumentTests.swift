@@ -73,6 +73,30 @@ final class DocumentTests: XCTestCase {
         }
     }
 
+    /// What PDFKit before 27 saves (no /NM, only our /PDFStudioNM and /PDFStudioN0 copies) is repaired in place.
+    func testRestoresNamesInFilesSavedWithoutNM() throws {
+        let doc = try XCTUnwrap(StudioDocument(data: Fixtures.pdf(), name: "t.pdf"))
+        try doc.importJSON(Fixtures.data("annotations.sample.json"))
+        let saved = try XCTUnwrap(doc.pdfData())
+        // Imitate PDFKit 26: no /NM, only our copies. Undo a restore this OS may already have done,
+        // then hide the remaining /NM keys (same lengths, so the file stays valid).
+        let restored = Data("/NM".utf8) + Data(repeating: 0x20, count: 9)
+        var old = saved
+        while let r = old.range(of: restored) { old.replaceSubrange(r, with: Data("/PDFStudioN0".utf8)) }
+        var from = old.startIndex
+        while let r = old.range(of: Data("/NM".utf8), in: from..<old.endIndex) {
+            from = r.upperBound
+            if r.upperBound < old.endIndex, [0x20, 0x28, 0x3C].contains(old[r.upperBound]) { old.replaceSubrange(r, with: Data("/XX".utf8)) }
+        }
+        XCTAssertTrue(AnnotationNames(data: old).isEmpty)
+        let fixed = AnnotationNames.restoringNames(in: old)
+        XCTAssertEqual(fixed.count, old.count, "offsets must not move")
+        XCTAssertFalse(AnnotationNames(data: fixed).isEmpty)
+        let reopened = try XCTUnwrap(StudioDocument(data: fixed, name: "r.pdf"))
+        XCTAssertEqual(Set(reopened.annotations.map(\.id)), Set(doc.annotations.map(\.id)))
+        XCTAssertEqual(AnnotationNames.restoringNames(in: saved), saved, "files with /NM are left alone")
+    }
+
     func testRotatedAndCroppedPagesKeepGeometry() throws {
         for rotation in [90, 180, 270] {
             let data = Fixtures.pdf(pages: 1, rotation: rotation, crop: CGRect(x: 20, y: 30, width: 560, height: 720))
