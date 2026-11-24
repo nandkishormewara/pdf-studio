@@ -501,19 +501,27 @@ the same.
 
 The standard PDF fonts only cover WinAnsi (Latin-1). For other text in text boxes and stamps:
 
-- **Shaped text (`unicodeText.ts`):** when a `TextShaper` is plugged in with `setTextShaper`, each line is split into
-  Latin runs (Helvetica, as before) and runs the shaper covers. Those are shaped (glyph ids, advances and mark
-  offsets) and written as real text in an embedded TrueType font: Type0 / CIDFontType2, Identity-H, with a
-  CIDToGIDMap. Each glyph-and-text pair gets its own character code, so the ToUnicode map says exactly what every
-  drawn glyph reads as (a cluster's characters are spread over its glyphs in drawing order); each run is also wrapped
-  in an `/ActualText` span. PDF.js and PDFium read the text back exactly, including vowel signs drawn before their
-  consonant. The font file is embedded once per document, at the end of `writeAnnotations`.
-- **The web app's shaper (`hbShaper.ts`, registered in `main.tsx`):** HarfBuzz (harfbuzzjs, MIT) with Noto Sans
-  Devanagari Regular and Bold (OFL). The wasm and fonts are loaded the first time a mark with non-Latin text is
-  saved. The React viewer package registers no shaper, so its output is unchanged unless the host app calls
-  `setTextShaper`.
-- **Fallback:** without a shaper, or when the font lacks a character (Arabic, CJK, emoji), the text is rendered by
-  the browser onto a 4×-resolution PNG and embedded as an image, as before.
+- **Shaped text (`unicodeText.ts`):** when a `TextShaper` is plugged in with `setTextShaper`, each line goes through a
+  simple bidi pass (UAX #9 for one line: base direction from the first strong character, European/Arabic numbers,
+  neutrals, run reordering, bracket mirroring in reversed Helvetica runs; explicit embeddings/isolates and bracket
+  pairing are not handled) and is split into Latin runs (Helvetica) and runs per shaped script (Devanagari, Arabic,
+  Hebrew). Shaped runs are written as real text in an embedded TrueType font (Type0 / CIDFontType2, Identity-H, with
+  a CIDToGIDMap): each glyph-and-text pair gets its own character code, so the ToUnicode map says exactly what each
+  drawn glyph reads as. A run's glyphs go in one `TJ`. Left-to-right runs also carry `/ActualText`; right-to-left
+  runs carry their text in visual order and no ActualText (readers reverse RTL themselves). Glyphs that carry no text
+  of their own (Arabic dots, harakat, matras) are drawn as vector outlines; combining marks travel on a zero-width
+  carrier glyph. PDF.js, PDFium and Apple PDFKit read the text back.
+- **Fonts:** embedded once per document at the end of `writeAnnotations`, subset by `ttfSubset.ts` (glyph ids kept;
+  only `head`, `hhea`, `hmtx`, `maxp`, `loca`, `glyf`, `post` v3, `OS/2`, plus `cvt`/`fpgm`/`prep` when present).
+  `writeAnnotations(…, { subsetFonts: false })` embeds the whole file. A short Hindi note adds about 5 KB.
+- **The web app's shaper (`hbShaper.ts`, registered in `main.tsx`):**
+  `harfBuzzShaper({ devanagari, arabic, hebrew: { regular, bold, name } }, load?)` over HarfBuzz (harfbuzzjs, MIT)
+  and Noto Sans Devanagari, Arabic and Hebrew (OFL). The wasm loads the first time a mark with non-Latin text is
+  saved, and each script's fonts only when that script is first saved. The first script listed also writes
+  punctuation Helvetica lacks (—, ₹) on lines with no other script. The React viewer package registers no shaper,
+  so its output is unchanged unless the host app calls `setTextShaper`.
+- **Fallback:** without a shaper, or for scripts it doesn't cover (CJK, emoji), the text is rendered by the browser
+  onto a 4×-resolution PNG and embedded as an image, as before.
 
 #### Rich text
 

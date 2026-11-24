@@ -16,6 +16,8 @@ import com.pdfstudio.sdk.PdfPoint
 import com.pdfstudio.sdk.PdfRect
 import com.pdfstudio.sdk.Pt
 import com.pdfstudio.sdk.Rgb
+import com.pdfstudio.sdk.RichText
+import com.pdfstudio.sdk.TextRun
 import com.pdfstudio.sdk.Xfdf
 import com.pdfstudio.sdk.textLayoutBox
 import com.pdfstudio.sdk.textOrigin
@@ -131,7 +133,11 @@ object AnnotationWriter {
                 d.setItem(COSName.getPDFName("RD"), floats(rd.toDouble(), rd.toDouble(), rd.toDouble(), rd.toDouble()))
             }
             AnnotationKind.INK -> d.setItem(COSName.getPDFName("InkList"), COSArray().apply { a.paths.orEmpty().forEach { add(pts(it)) } })
-            AnnotationKind.FREETEXT -> d.setString(COSName.DA, "/Helv ${a.fontSize ?: 14.0} Tf ${c.r} ${c.g} ${c.b} rg")
+            AnnotationKind.FREETEXT -> {
+                d.setString(COSName.DA, "/Helv ${a.fontSize ?: 14.0} Tf ${c.r} ${c.g} ${c.b} rg")
+                // Rich content: Acrobat and Apryse read this to show and edit the styling (as the web SDK writes it).
+                a.richText?.takeIf { it.isNotEmpty() }?.let { d.setString(COSName.getPDFName("RC"), RichText.toXhtml(it, a.color, a.fontSize ?: 14.0)) }
+            }
             AnnotationKind.NOTE -> { d.setName(COSName.NAME, "Comment"); d.setBoolean(COSName.getPDFName("Open"), false) }
             AnnotationKind.STAMP -> d.setName(COSName.NAME, a.text.orEmpty().filter { it.isLetter() && it.code < 128 }.ifEmpty { "Approved" })
             AnnotationKind.SIGNATURE -> d.setName(COSName.NAME, "Signature")
@@ -283,14 +289,17 @@ object AnnotationWriter {
                 // Rotated text: lay out upright in the turned box, then turn it about the box centre (counter-clockwise).
                 val size = a.fontSize ?: 14.0
                 val lay = textLayoutBox(box, a.rotation)
-                val at = textOrigin(lay, a.rotation, size, a.text.orEmpty().lines().size)
+                val runs = a.richText?.takeIf { it.isNotEmpty() }
+                val at = textOrigin(lay, a.rotation, size, runs?.let { RichText.lines(it).size } ?: a.text.orEmpty().lines().size)
                 a.rotation?.let { deg ->
                     val c = ctx.g.toPdf(Pt(box.x + box.w / 2, box.y + box.h / 2)); val t = Math.toRadians(deg.toDouble())
                     val cs0 = cos(t); val sn = sin(t)
                     cs.transform(Matrix(cs0.toFloat(), sn.toFloat(), (-sn).toFloat(), cs0.toFloat(),
                         (c.x - cs0 * c.x + sn * c.y).toFloat(), (c.y - sn * c.x - cs0 * c.y).toFloat()))
                 }
-                text(ctx, a.text.orEmpty(), Box(at.x, at.y, lay.w - (at.x - lay.x) * 2, lay.h - (at.y - lay.y) * 2), size, a.color, bold = false)
+                val textArea = Box(at.x, at.y, lay.w - (at.x - lay.x) * 2, lay.h - (at.y - lay.y) * 2)
+                if (runs != null) richText(ctx, runs, textArea, size, a.color)
+                else text(ctx, a.text.orEmpty(), textArea, size, a.color, bold = false)
                 a.rect?.let { r -> corners(r).forEach { ctx.pdf(it) } }
             }
             AnnotationKind.NOTE -> a.rect?.let { r ->
@@ -344,6 +353,58 @@ object AnnotationWriter {
             ctx.cs.endText()
             ctx.points += ctx.g.toPdf(Pt(x, baseline))
         }
+    }
+
+    private fun isLatin(s: String) = s.all { it == '\n' || it.code in 0x20..0x7e || it.code in 0xa0..0xff }
+
+    /** Styled runs line by line: Helvetica bold / oblique per run, the run's colour, underlines. Same as the web SDK. */
+    private fun richText(ctx: Ctx, runs: List<TextRun>, box: Box, size: Double, baseColor: String) {
+        val lines = RichText.lines(runs)
+        if (!isLatin(RichText.plainText(runs))) {
+            image(ctx, renderRichText(lines, size, baseColor), box.copy(h = min(box.h, size * 1.25 * lines.size)), keepAspect = true)
+            return
+        }
+        lines.forEachIndexed { i, line ->
+            val baseline = box.y + size * (i + 0.85) + size * 0.15 * i
+            var x = box.x
+            for (r in line) {
+                val font = when {
+                    r.bold && r.italic -> PDType1Font.HELVETICA_BOLD_OBLIQUE; r.bold -> PDType1Font.HELVETICA_BOLD
+                    r.italic -> PDType1Font.HELVETICA_OBLIQUE; else -> PDType1Font.HELVETICA
+                }
+                val color = r.color ?: baseColor
+                val c = Rgb.of(color)
+                ctx.cs.beginText()
+                ctx.cs.setFont(font, size.toFloat())
+                ctx.cs.setNonStrokingColor(c.r.toFloat(), c.g.toFloat(), c.b.toFloat())
+                ctx.cs.setTextMatrix(basis(ctx.g, Pt(x, baseline)))
+                ctx.cs.showText(r.text)
+                ctx.cs.endText()
+                val w = font.getStringWidth(r.text) / 1000 * size
+                if (r.underline) stroke(ctx, listOf(Pt(x, baseline + size * 0.12), Pt(x + w, baseline + size * 0.12)), color, max(0.6, size / 16))
+                x += w
+            }
+            ctx.points += ctx.g.toPdf(Pt(box.x, baseline)); ctx.points += ctx.g.toPdf(Pt(x, baseline))
+        }
+    }
+
+    private fun renderRichText(lines: List<List<TextRun>>, size: Double, baseColor: String): Bitmap {
+        val scale = 4f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = (size * scale).toFloat() }
+        fun styled(r: TextRun) = paint.apply {
+            typeface = Typeface.create(Typeface.DEFAULT, when { r.bold && r.italic -> Typeface.BOLD_ITALIC; r.bold -> Typeface.BOLD; r.italic -> Typeface.ITALIC; else -> Typeface.NORMAL })
+            isUnderlineText = r.underline
+            color = Rgb.of(r.color ?: baseColor).argb()
+        }
+        val lineH = paint.fontSpacing
+        val w = max(1, lines.maxOf { line -> line.sumOf { styled(it).measureText(it.text).toDouble() } }.toInt() + 4)
+        val bmp = Bitmap.createBitmap(w, max(1, (lineH * lines.size).toInt() + 4), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        lines.forEachIndexed { i, line ->
+            var x = 2f
+            for (r in line) { val p = styled(r); canvas.drawText(r.text, x, -p.ascent() + i * lineH, p); x += p.measureText(r.text) }
+        }
+        return bmp
     }
 
     private fun image(ctx: Ctx, bmp: Bitmap, r: Box, keepAspect: Boolean = false, center: Boolean = false) {

@@ -108,6 +108,28 @@ object PdfStudio {
         }
     }
 
+    /**
+     * Writes a copy of `source` with its pages rotated, deleted and moved by [ops] (applied in order; see [PageOp]),
+     * and returns the document's annotations as they now stand. The annotations PDF Studio can edit (its own and other
+     * apps' markup) are read from the file, re-mapped to the new page order and orientation, and written back editable;
+     * pass [annotations] to write those instead (for example marks kept outside the file). Links and form fields stay
+     * on their pages. The model side alone is [PageEdits.apply].
+     *
+     * @throws IllegalArgumentException for a page number out of range, or deleting every page.
+     */
+    fun editPages(source: File, output: File, ops: List<PageOp>, annotations: List<Annotation>? = null): List<Annotation> {
+        PDDocument.load(source, MemoryUsageSetting.setupTempFileOnly()).use { doc ->
+            val geometries = (0 until doc.numberOfPages).map { AnnotationWriter.geometry(doc.getPage(it)) }
+            val inFile = AnnotationReader.extract(doc, remove = true)
+            val result = PageEdits.apply(geometries, annotations ?: inFile, ops)
+            com.pdfstudio.sdk.pdf.PageWriter.apply(doc, result.pages)
+            AnnotationWriter.write(doc, result.annotations, AnnotationWriter.Mode.EDITABLE)
+            output.parentFile?.mkdirs()
+            FileOutputStream(output).use { doc.save(it) }
+            return result.annotations
+        }
+    }
+
     /** The PDF's fillable form fields (text, checkbox, radio, dropdown, list) with their current values. */
     fun readFormFields(file: File): List<FormField> = com.pdfstudio.sdk.pdf.FormFields.read(file)
 

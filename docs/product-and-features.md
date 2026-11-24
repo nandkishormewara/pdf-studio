@@ -53,19 +53,19 @@ All parts use the same annotation data (JSON and XFDF) and the same coordinate s
 | Highlight / underline / strikeout | ✅ | ✅ | ✅ | Android: long-press-drag selection |
 | Squiggly, cloud, polygon / polyline (from Apryse XFDF) | ◐ | ◐ | ◐ | Imported and shown; the React viewer package also draws them |
 | Text box, sticky note, freehand, rectangle, ellipse, line, arrow | ✅ | ✅ | ✅ | Android: tap a mark to comment on it or delete it; undo covers every change |
-| Rich text in text boxes (bold, italic, underline, colour) | ✅ | ◐ | ◐ | Mobile shows the plain text; styling is kept in the file |
+| Rich text in text boxes (bold, italic, underline, colour) | ✅ | ◐ | ◐ | Mobile draws styled text from files and keeps it (Android also writes and reads `/RC`, as Acrobat does); the mobile Text tools type plain text |
 | Stamps (incl. Hindi स्वीकृत), signature picture | ✅ | ✅ | ◐ | |
 | Comments, review status, author | ✅ | ✅ | ✅ | |
-| Measurement: distance, perimeter, area, scale, calibration | ✅ | ◐ | — | iOS shows and keeps them; created only on the web |
+| Measurement: distance, perimeter, area, scale, calibration | ✅ | ✅ | ◐ | Same JSON on every platform. Android: no calibrate-from-a-line, and the scale isn't remembered between sessions |
 | Forms: fill, JSON in / out, reset, flatten | ✅ | ◐ | ◐ | iOS: PDFKit form filling. Android: fill text, checkbox, radio and choice fields (viewer Form sheet or `PdfStudio.fillForm`), flatten from the API |
-| Pages: rotate, delete, reorder, insert, merge, extract | ✅ | — | — | |
+| Pages: rotate, delete, reorder, insert, merge, extract | ✅ | — | ◐ | Android: rotate, delete and move in the Pages sheet (undoable) and `PdfStudio.editPages`; marks follow their page. On rotation Android also turns boxes, ovals and callouts, where the web keeps their size |
 | Save editable (Acrobat-compatible) / flattened | ✅ | ✅ | ✅ | |
 | XFDF import / export (Apryse dialect incl. add / modify / delete) | ✅ | ✅ | ✅ | |
 | Print | ✅ | ✅ (system) | ✅ (system) | |
 | Autosave per document | ✅ | — | — | Browser storage; apps save through the host app |
 | Keyboard use and screen readers | ✅ | ◐ | ◐ | Web audited with axe-core; mobile relies on PDFKit / Compose defaults |
 | OCR (160+ languages) | ✅ server | — | — | |
-| True redaction | ✅ server | ◐ | — | iOS can draw redaction marks; applying them (server) is done from the web |
+| True redaction | ✅ server | ✅ server | — | iOS: draw marks, then *Apply* through a configured PDF Studio server (`StudioDocument.applyRedactions`); the result opens as a new “…-redacted.pdf” |
 | Digital signatures (PAdES): sign, verify, tamper detection | ✅ server | — | — | |
 | Optimise for web (linearize, shrink images) | ✅ server | — | — | |
 | Extract text: plain, lines and words with positions and fonts (JSON), word table (CSV) | ✅ (+ server) | ✅ | ✅ | Same JSON on every platform; positions in page units |
@@ -78,7 +78,7 @@ All parts use the same annotation data (JSON and XFDF) and the same coordinate s
 
 - **Annotations are real PDF annotations.** Saved files open with their marks in Acrobat, Chrome, Edge, Firefox and macOS Preview. PDF Studio also stores its own copy inside each annotation, so reopening in PDF Studio gives back exactly what was drawn.
 - **Annotations already in a file become editable** when it is opened, whether they were made in Acrobat, Chrome, Preview, Apryse or PDF Studio.
-- **Hindi and other scripts** are typed and shown correctly everywhere. When the web app saves a file, Hindi (Devanagari) text in marks is real PDF text in an embedded Noto Sans Devanagari font: it can be selected, searched and copied, and flattened copies are searchable. Other non-Latin scripts (Arabic, CJK, emoji), and text saved by the mobile SDKs, are still stored as a sharp picture of the text: it prints and displays correctly but can't be selected (see §6).
+- **Hindi, Arabic and Hebrew** are typed and shown correctly everywhere. When the web app saves a file, Hindi (Devanagari), Arabic and Hebrew text in marks is real PDF text in embedded, trimmed Noto Sans fonts (only the glyphs used, a few KB), written right-to-left where needed: it can be selected, searched and copied, and flattened copies are searchable. Chinese, Japanese, Korean, emoji and other scripts, and text saved by the mobile SDKs, are still stored as a sharp picture of the text: it prints and displays correctly but can't be selected (see §6).
 - **Rich text** in text boxes is saved in the same format Acrobat and Apryse use (`/RC` in the PDF, `contents-richtext` in XFDF).
 - **Redaction removes content.** Every page with a redaction mark is rebuilt as an image with the marked area painted out. The page's text, fonts and drawings are deleted from the file. Annotations and form fields under a mark are removed. Hidden information (title, author, metadata, scripts, attachments) can also be removed. Remaining text can be recognised again so the page stays searchable.
 - **Digital signatures** are PAdES (the European / Adobe standard for PDF signatures), made with the server's certificate. Until the organisation's own certificate is installed, the server uses a *development certificate*, which other readers show as "not trusted" ([server and deployment](server-and-deployment.md#7-signing-certificates)).
@@ -121,7 +121,7 @@ Measured on test files (26 Oct 2026, Mac): text from the 300-page file in 0.5 s 
 
 | Area | Limitation | Possible fix |
 |---|---|---|
-| Non-Latin text in saved annotations | Web: Hindi (Devanagari) is real, searchable text (HarfBuzz + embedded Noto Sans Devanagari, about 220 KB per weight used). Other scripts, and the iOS and Android SDKs, still save a picture | Add fonts for more scripts (Arabic needs right-to-left runs); port to the mobile SDKs; subset the embedded font |
+| Non-Latin text in saved annotations | Web: Hindi, Arabic and Hebrew are real, searchable text (HarfBuzz, subset Noto Sans fonts). Right-to-left lines are left-aligned in their box; bidi control characters and bracket pairing are not handled; PDF.js may not find a search that crosses from Arabic into Latin on one line, and in vowelled Arabic it can show a stray space before a final mark (PDFium and Apple PDFKit read both correctly). CJK and emoji, and the iOS and Android SDKs, still save a picture | Fonts for more scripts; port to the mobile SDKs |
 | Non-Latin form values | Saved correctly but drawn by the reader (`NeedAppearances`); such forms can't be flattened | Same |
 | Encrypted PDFs | View, annotate and print only; no saving, redaction or signing | Decrypt on the server with the owner's password |
 | Editing a signed PDF | Saving rewrites the file and breaks earlier signatures (the app warns) | Incremental save of annotations |
@@ -135,8 +135,8 @@ Measured on test files (26 Oct 2026, Mac): text from the 300-page file in 0.5 s 
 | Extraction | Reading order is worked out from positions: columns that share a row with a heading or table below them across the whole page, columns whose section breaks line up, and layouts like sidebars can still come out in an unexpected order (switch reading order off to get the file's own order). On iPhone and Android, tables drawn with lines are read column by column unless their text also lines up (PDFKit and PdfBox give no ruling lines; the server and the web read them). Word boxes inside a run are proportional in the browser (exact on the server, iOS and Android). Hindi and other Indic text from office-made PDFs depends on the file's character map: the browser can produce broken words where the server (PDFium) reads them correctly. Scanned pages need OCR first. Server images lose transparency (soft masks); browser PNGs keep it. Extracted font files are usually licensed. Tables: borderless tables need three or more rows with two or more columns; a cell whose text wraps onto a second line without lines around it becomes its own row; tables split across pages come out as one table per page; scanned tables need OCR first | Reading-order analysis; use the server for Indic text; join tables across pages |
 | SDK error messages | A few low-level messages (e.g. "This file is not valid XFDF.") are English only | Route them through translations |
 | Accessibility | Automated audit clean and keyboard tested; no full screen-reader session yet | VoiceOver / NVDA pass |
-| iOS | Measurements shown and kept but created only on the web; redaction marks can be drawn but are applied from the web; free text on rotated pages drawn unrotated | Port the web tools; call the server from the SDK |
-| Android | No outline panel, no OCR, no drag handles to adjust a text selection | Port |
+| iOS | Page tools (rotate, delete, reorder) are web only. On macOS, a flattened save draws stamps, measurements and signatures as a generic box (free text and editable saves are fine) | Port the page tools; draw those marks into the flattened page |
+| Android | No outline panel, no OCR, no drag handles to adjust a text selection; no insert / merge / extract pages; form fields only on a deleted page stay in the form | Port |
 
 ## 7. Not built
 

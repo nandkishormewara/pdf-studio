@@ -3,6 +3,7 @@ package com.pdfstudio.sdk.viewer
 import com.pdfstudio.sdk.Annotation
 import com.pdfstudio.sdk.AnnotationKind
 import com.pdfstudio.sdk.Box
+import com.pdfstudio.sdk.MeasureScale
 import com.pdfstudio.sdk.Pt
 import com.pdfstudio.sdk.ReviewStatus
 import kotlin.math.max
@@ -11,9 +12,13 @@ import kotlin.math.min
 /** Viewer tools. Drag tools draw while the finger moves; tap tools ask for text where the page is tapped. */
 internal enum class Tool(val label: String, val drag: Boolean = true) {
     VIEW("Select", drag = false), PEN("Pen"), HIGHLIGHTER("Highlighter"), RECT("Box"), ELLIPSE("Oval"),
-    LINE("Line"), ARROW("Arrow"), TEXT("Text", drag = false), NOTE("Note", drag = false);
+    LINE("Line"), ARROW("Arrow"), TEXT("Text", drag = false), NOTE("Note", drag = false),
+    DISTANCE("Distance"), PERIMETER("Perimeter", drag = false), AREA("Area", drag = false);
 
     val asksForText get() = this == TEXT || this == NOTE
+    /** Tap to add points, then finish (Done, or tap the first point). */
+    val placesPoints get() = this == PERIMETER || this == AREA
+    val measures get() = this == DISTANCE || placesPoints
 }
 
 /** The colours offered for new marks, as on the web toolbar. */
@@ -25,7 +30,7 @@ internal object Editing {
     const val TEXT_SIZE = 14.0
 
     /** The mark a drag with [tool] makes from [pts] (page units), or null when the drag is too small. */
-    fun shape(tool: Tool, page: Int, pts: List<Pt>, color: String, author: String): Annotation? {
+    fun shape(tool: Tool, page: Int, pts: List<Pt>, color: String, author: String, measure: MeasureScale? = null): Annotation? {
         if (pts.size < 2) return null
         val a = pts.first(); val b = pts.last()
         val span = Box.spanning(a, b)
@@ -40,9 +45,27 @@ internal object Editing {
                 page = page, kind = if (tool == Tool.LINE) AnnotationKind.LINE else AnnotationKind.ARROW,
                 color = color, strokeWidth = 2.0, points = listOf(a, b), author = author,
             )
-            Tool.VIEW, Tool.TEXT, Tool.NOTE -> null
+            Tool.DISTANCE -> if (measure == null || kotlin.math.hypot(b.x - a.x, b.y - a.y) < 4) null else Annotation(
+                page = page, kind = AnnotationKind.DISTANCE, color = color, strokeWidth = 2.0, points = listOf(a, b), measure = measure, author = author,
+            )
+            Tool.VIEW, Tool.TEXT, Tool.NOTE, Tool.PERIMETER, Tool.AREA -> null
         }
     }
+
+    /**
+     * The perimeter or area measurement through the tapped [pts], or null with too few points (2 for a perimeter,
+     * 3 for an area). Points within 2 units of the previous one (a double tap) count once. Same as the web viewer.
+     */
+    fun polygon(tool: Tool, page: Int, pts: List<Pt>, color: String, author: String, measure: MeasureScale): Annotation? {
+        val clean = pts.filterIndexed { i, p -> i == 0 || kotlin.math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y) > 2 }
+        val kind = when (tool) { Tool.PERIMETER -> AnnotationKind.PERIMETER; Tool.AREA -> AnnotationKind.AREA; else -> return null }
+        if (clean.size < (if (kind == AnnotationKind.AREA) 3 else 2)) return null
+        return Annotation(page = page, kind = kind, color = color, strokeWidth = 2.0, points = clean, measure = measure, author = author)
+    }
+
+    /** True when a tap at [p] closes the shape: it lands within [slop] units of the first of at least 3 [pts]. */
+    fun closesPolygon(pts: List<Pt>, p: Pt, slop: Double): Boolean =
+        pts.size >= 3 && kotlin.math.hypot(p.x - pts[0].x, p.y - pts[0].y) <= slop
 
     /**
      * A text box with its top-left at [at], sized to [text] (14 pt, about 0.55 em per character) and kept on a page
@@ -99,16 +122,16 @@ internal object Editing {
     }
 }
 
-/** Undo for the viewer: snapshots of the mark list before each change. */
-internal class EditHistory(private val limit: Int = 100) {
-    private val past = ArrayDeque<List<Annotation>>()
+/** Undo for the viewer: snapshots (the mark list, and the pages when they change) taken before each change. */
+internal class EditHistory<T>(private val limit: Int = 100) {
+    private val past = ArrayDeque<T>()
     val canUndo get() = past.isNotEmpty()
 
-    fun record(before: List<Annotation>) {
-        past.addLast(before.toList())
+    fun record(before: T) {
+        past.addLast(before)
         while (past.size > limit) past.removeFirst()
     }
 
-    /** The list to go back to, or null when there is nothing to undo. */
-    fun undo(): List<Annotation>? = past.removeLastOrNull()
+    /** The state to go back to, or null when there is nothing to undo. */
+    fun undo(): T? = past.removeLastOrNull()
 }

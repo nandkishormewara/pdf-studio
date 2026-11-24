@@ -46,8 +46,35 @@ class PageGeometry(val crop: PdfRect, rotation: Int) {
     fun toPage(r: PdfRect): Box = Box.spanning(toPage(PdfPoint(r.left, r.bottom)), toPage(PdfPoint(r.right, r.top)))
 }
 
+/**
+ * A drawing scale: [paperValue] [paperUnit] on the page stands for [worldValue] [worldUnit] in the real world
+ * ("1 cm = 2.5 m"). Same as the web SDK's `ScaleSetting` (web/src/sdk/measure.ts); the default is 1 in = 1 in.
+ */
+data class ScaleSetting(
+    val paperValue: Double = 1.0,
+    val paperUnit: String = "in",
+    val worldValue: Double = 1.0,
+    val worldUnit: String = "in",
+    val precision: Int = 2,
+) {
+    /** The [MeasureScale] stored on new measurements: real-world units per PDF point. */
+    fun toMeasureScale() = MeasureScale(
+        factor = worldValue / (paperValue * (Measure.PAPER_UNITS[paperUnit] ?: 72.0)),
+        unit = worldUnit, precision = precision,
+    )
+
+    /** "1 in = 1 in", as the web shows it. */
+    fun describe(): String = "${num(paperValue)} $paperUnit = ${num(worldValue)} $worldUnit"
+
+    private fun num(v: Double) = if (v % 1.0 == 0.0) v.toLong().toString() else v.toString()
+}
+
 /** Measurement maths shared with the web/iOS SDKs. */
 object Measure {
+    /** PDF points per unit of paper measurement. */
+    val PAPER_UNITS = mapOf("in" to 72.0, "cm" to 72 / 2.54, "mm" to 72 / 25.4, "pt" to 1.0)
+    val WORLD_UNITS = listOf("in", "ft", "yd", "mi", "mm", "cm", "m", "km", "pt")
+
     fun length(pts: List<Pt>, closed: Boolean = false): Double {
         var total = pts.zipWithNext { a, b -> hypot(b.x - a.x, b.y - a.y) }.sum()
         if (closed && pts.size > 2) total += hypot(pts.first().x - pts.last().x, pts.first().y - pts.last().y)

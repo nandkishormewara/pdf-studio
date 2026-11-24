@@ -39,6 +39,9 @@ PDFStudioViewer(document: doc, allowsTextSelection: false)            // SwiftUI
 
 // Editor
 PDFStudioEditor(document: doc, author: currentUser.name)
+PDFStudioEditor(document: doc, author: currentUser.name, server: PDFStudioServer(string: "https://pdf.example.com"))
+                                                                  // with a server: an Apply action for redaction marks
+let (redacted, report) = try await doc.applyRedactions(using: PDFStudioServer(string: "https://pdf.example.com")!)
 let editable = doc.pdfData(.editable), flat = doc.pdfData(.flattened)
 let xfdf = doc.exportXFDF(), json = doc.exportJSON()
 
@@ -91,6 +94,7 @@ PdfStudio.extractPlainText(pdf)                                      // "===== P
 PdfStudio.extractTextJson(pdf)                                       // the web SDK's pdf-studio-text JSON
 PdfStudio.readFormFields(pdf)                                        // text, checkbox, radio, dropdown and list fields with values
 PdfStudio.fillForm(pdf, mapOf("name" to "Jane Doe", "agree" to "true"), outPdf)   // flatten = true to burn them in
+PdfStudio.editPages(pdf, outPdf, listOf(PageOp.Rotate(0), PageOp.Move(from = 2, to = 0), PageOp.Delete(3)))  // marks follow their page
 ```
 
 With `readOnly = false` the viewer offers select, pen, highlighter, box, oval, line, arrow, text and note tools with a

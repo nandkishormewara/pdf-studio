@@ -41,6 +41,7 @@ public struct PDFStudioViewer: UIViewRepresentable {
 final class EditorController: ObservableObject {
     weak var view: StudioPDFView?
     @Published var hasTextSelection = false
+    @Published var measureDraft: MeasureDraft?
 }
 
 struct StudioCanvas: UIViewRepresentable {
@@ -49,6 +50,7 @@ struct StudioCanvas: UIViewRepresentable {
     var style: StudioToolStyle
     var author: String
     var signature: String?
+    var measureScale: MeasureScaleSetting
     let controller: EditorController
     var requestText: (String, String, @escaping (String?) -> Void) -> Void
     var onToolFinished: () -> Void
@@ -58,6 +60,7 @@ struct StudioCanvas: UIViewRepresentable {
         controller.view = v
         v.setDocument(document)
         v.onSelectionChanged = { [weak controller] has in controller?.hasTextSelection = has }
+        v.onMeasureDraftChanged = { [weak controller] d in controller?.measureDraft = d }
         update(v)
         return v
     }
@@ -70,16 +73,45 @@ struct StudioCanvas: UIViewRepresentable {
         v.style = style
         v.author = author
         v.signatureImage = signature
+        v.measureScale = measureScale
         v.requestText = requestText
         v.onToolFinished = onToolFinished
     }
 }
 
-/// A complete annotation editor: tools, colours, undo/redo, search, comments, thumbnails,
-/// signatures and export (editable PDF, flattened PDF, XFDF, JSON).
+/// A complete annotation editor: tools (including distance, perimeter and area measurements), colours, undo/redo,
+/// search, comments, thumbnails, signatures and export (editable PDF, flattened PDF, XFDF, JSON).
+///
+/// With a `server`, redaction marks can be applied: the document goes to the PDF Studio server's `/redact` and the
+/// editor switches to the redacted copy (also passed to `onDocumentChange`, e.g. to save it).
 public struct PDFStudioEditor: View {
     @ObservedObject var document: StudioDocument
     let author: String
+    let server: PDFStudioServer?
+    let onDocumentChange: ((StudioDocument) -> Void)?
+    @State private var replacement: StudioDocument?
+
+    public init(document: StudioDocument, author: String = "Me", server: PDFStudioServer? = nil,
+                onDocumentChange: ((StudioDocument) -> Void)? = nil) {
+        self.document = document
+        self.author = author
+        self.server = server
+        self.onDocumentChange = onDocumentChange
+    }
+
+    public var body: some View {
+        EditorContent(document: replacement ?? document, author: author, server: server) { doc in
+            replacement = doc
+            onDocumentChange?(doc)
+        }
+    }
+}
+
+struct EditorContent: View {
+    @ObservedObject var document: StudioDocument
+    let author: String
+    let server: PDFStudioServer?
+    let onRedacted: (StudioDocument) -> Void
 
     @StateObject private var controller = EditorController()
     @State private var tool: StudioTool = .select
@@ -91,20 +123,25 @@ public struct PDFStudioEditor: View {
     @State private var showThumbnails = false
     @State private var textPrompt: TextPrompt?
     @State private var share: ShareItem?
+    @State private var measureScale = EditorContent.savedScale()
+    @State private var showScale = false
+    @State private var confirmRedaction = false
+    @State private var busy: String?
+    @State private var notice: String?
+    @State private var failure: String?
 
     static let colors = ["#ffd84d", "#7ee081", "#5ab0ff", "#ff7aa8", "#e5484d", "#1f6feb", "#111111", "#7c3aed"]
     static let stamps = ["APPROVED", "REJECTED", "DRAFT", "CONFIDENTIAL", "REVIEWED", "स्वीकृत"]
 
-    public init(document: StudioDocument, author: String = "Me") {
-        self.document = document
-        self.author = author
+    static func savedScale() -> MeasureScaleSetting {
+        UserDefaults.standard.data(forKey: "pdfstudio.scale").flatMap { try? JSONDecoder().decode(MeasureScaleSetting.self, from: $0) } ?? .default
     }
 
-    public var body: some View {
+    var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
                 StudioCanvas(document: document, tool: tool, style: style, author: author, signature: signature,
-                             controller: controller, requestText: { title, initial, done in
+                             measureScale: measureScale, controller: controller, requestText: { title, initial, done in
                                  textPrompt = TextPrompt(title: title, text: initial, done: done)
                              }, onToolFinished: { tool = .select })
                     .ignoresSafeArea(edges: .bottom)
@@ -112,6 +149,21 @@ public struct PDFStudioEditor: View {
                     hintPill(controller.hasTextSelection ? nil : "Select text, then tap \(tool.title)") {
                         controller.view?.applyMarkupToSelection()
                     }
+                }
+                if tool.placesPoints { measurePill }
+                if tool == .distance { notePill("Drag between two points to measure") }
+                if tool == .redact || document.selectedID.flatMap(document.annotation(id:))?.kind == .redact {
+                    if server != nil, !document.redactionMarks.isEmpty, busy == nil {
+                        Button("Apply \(document.redactionMarks.count) redaction(s)…", systemImage: "eraser.line.dashed") { confirmRedaction = true }
+                            .font(.footnote.bold()).buttonStyle(.borderedProminent).tint(.red).clipShape(Capsule()).padding(.top, 8)
+                    } else if busy == nil {
+                        notePill("Drag over content to remove. Nothing is removed until the marks are applied.")
+                    }
+                }
+                if let busy {
+                    ProgressView(busy).padding(16).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)).padding(.top, 80)
+                } else if let notice {
+                    notePill(notice).onTapGesture { self.notice = nil }
                 }
             }
             if showThumbnails { ThumbnailStrip(pdfView: controller.view?.pdfView).frame(height: 96) }
@@ -129,6 +181,28 @@ public struct PDFStudioEditor: View {
         .sheet(isPresented: $showSearch) { SearchSheet(document: document, pdfView: controller.view?.pdfView) }
         .sheet(isPresented: $showComments) { CommentsSheet(document: document, pdfView: controller.view?.pdfView) }
         .sheet(item: $share) { item in ActivityView(items: [item.url]) }
+        .sheet(isPresented: $showScale) {
+            ScaleSheet(scale: $measureScale, selected: document.selectedID.flatMap(document.annotation(id:))) { next, factor in
+                // like the web: changing the scale re-scales the selected measurement too
+                if let id = document.selectedID, document.annotation(id: id)?.measure != nil {
+                    var m = next.measureScale
+                    if let factor { m.factor = factor }
+                    document.update(id) { $0.measure = m }
+                }
+            }
+        }
+        .onChange(of: measureScale) { _, s in
+            if let d = try? JSONEncoder().encode(s) { UserDefaults.standard.set(d, forKey: "pdfstudio.scale") }
+        }
+        .confirmationDialog("Apply \(document.redactionMarks.count) redaction(s)?", isPresented: $confirmRedaction, titleVisibility: .visible) {
+            Button("Apply redactions", role: .destructive) { applyRedactions() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The document is sent to the PDF Studio server, which permanently removes the text, images and drawings under the marks and cleans hidden information. You then get a redacted copy; this document is not changed.")
+        }
+        .alert("Redaction failed", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(failure ?? "") }
         .alert(textPrompt?.title ?? "", isPresented: Binding(get: { textPrompt != nil }, set: { if !$0 { textPrompt = nil } })) {
             TextField("", text: Binding(get: { textPrompt?.text ?? "" }, set: { textPrompt?.text = $0 }), axis: .vertical)
             Button("Cancel", role: .cancel) { textPrompt?.done(nil); textPrompt = nil }
@@ -146,6 +220,12 @@ public struct PDFStudioEditor: View {
             Button { showComments = true } label: { Image(systemName: "text.bubble") }
             Button { showThumbnails.toggle() } label: { Image(systemName: "square.grid.2x2") }
             Menu {
+                // shown only with a server and marks to apply (in this menu so it stays reachable on narrow screens)
+                if server != nil, !document.redactionMarks.isEmpty {
+                    Button("Apply \(document.redactionMarks.count) redaction(s)…", systemImage: "eraser.line.dashed") { confirmRedaction = true }
+                        .disabled(busy != nil)
+                    Divider()
+                }
                 Button("Share PDF (editable annotations)", systemImage: "square.and.arrow.up") { export(.editable) }
                 Button("Share flattened PDF", systemImage: "doc.richtext") { export(.flattened) }
                 Button("Export XFDF", systemImage: "chevron.left.forwardslash.chevron.right") { exportText(document.exportXFDF(), ext: "xfdf") }
@@ -190,7 +270,11 @@ public struct PDFStudioEditor: View {
                 if tool == .signature {
                     Button(signature == nil ? "Create" : "Change") { showSignaturePad = true }.font(.footnote)
                 }
-                if [.ink, .rect, .ellipse, .line, .arrow].contains(tool) {
+                if tool.isMeasurement || document.selectedID.flatMap(document.annotation(id:))?.measure != nil {
+                    Button { showScale = true } label: { Label(measureScale.summary, systemImage: "ruler") }
+                        .font(.footnote).accessibilityLabel("Measurement scale \(measureScale.summary)")
+                }
+                if [.ink, .rect, .ellipse, .line, .arrow, .distance, .perimeter, .area].contains(tool) {
                     Stepper(value: $style.strokeWidth, in: 0.5...12, step: 0.5) { Text("\(style.strokeWidth, specifier: "%.1f")").font(.footnote.monospacedDigit()) }
                         .fixedSize()
                 }
@@ -204,6 +288,7 @@ public struct PDFStudioEditor: View {
     private func selectionBar(_ a: Annotation) -> some View {
         HStack {
             Text(a.kind.rawValue.capitalized).font(.footnote.bold())
+            if a.kind.isMeasurement { Text(Measure.label(a)).font(.footnote.monospacedDigit()) }
             Text("p.\(a.page + 1) · \(a.author)").font(.footnote).foregroundStyle(.secondary)
             Spacer()
             Button("Comment") {
@@ -228,6 +313,47 @@ public struct PDFStudioEditor: View {
             }
         }
         .padding(.top, 8)
+    }
+
+    private var measurePill: some View {
+        let d = controller.measureDraft
+        return HStack(spacing: 8) {
+            if let d, !d.points.isEmpty {
+                Text(d.points.count >= 2 ? d.label(scale: measureScale.measureScale) : "Tap the next point").font(.footnote.monospacedDigit())
+                Button { controller.view?.removeLastMeasurePoint() } label: { Image(systemName: "arrow.uturn.backward") }
+                    .accessibilityLabel("Remove last point")
+                Button("Cancel") { controller.view?.cancelMeasurement() }.font(.footnote)
+                Button("Finish") { controller.view?.finishMeasurement() }
+                    .font(.footnote.bold()).buttonStyle(.borderedProminent).disabled(!d.canFinish)
+            } else {
+                Text("Tap points to measure \(tool == .area ? "an area" : "a perimeter"), then Finish").font(.footnote)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(.thinMaterial, in: Capsule())
+        .padding(.top, 8)
+    }
+
+    private func notePill(_ text: String) -> some View {
+        Text(text).font(.footnote).multilineTextAlignment(.center)
+            .padding(.horizontal, 12).padding(.vertical, 6).background(.thinMaterial, in: Capsule()).padding(.top, 8)
+    }
+
+    private func applyRedactions() {
+        guard let server else { return }
+        busy = "Redacting…"
+        Task {
+            defer { busy = nil }
+            do {
+                let (doc, r) = try await document.applyRedactions(using: server)
+                tool = .select
+                onRedacted(doc)
+                let cleaned = r.sanitized.isEmpty ? "—" : r.sanitized.joined(separator: ", ")
+                notice = "Redacted \(r.regions) area(s) on \(r.pages.count) page(s); removed \(r.annotationsRemoved) overlapping annotation(s); hidden information cleaned: \(cleaned). Share to save the redacted file."
+            } catch {
+                failure = error.localizedDescription
+            }
+        }
     }
 
     private func choose(_ t: StudioTool) {
@@ -259,6 +385,77 @@ public struct PDFStudioEditor: View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(base)-annotations.\(ext)")
         try? text.write(to: url, atomically: true, encoding: .utf8)
         share = ShareItem(url: url)
+    }
+}
+
+/// Scale for new measurements (web measure bar): paper length = real-world length, precision, and calibrating
+/// from a selected distance measurement drawn over a known length.
+struct ScaleSheet: View {
+    @Binding var scale: MeasureScaleSetting
+    let selected: Annotation?
+    /// The new setting, and the exact factor when calibrated.
+    var onChange: (MeasureScaleSetting, Double?) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var realLength = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        TextField("Paper", value: value(\.paperValue), format: .number).keyboardType(.decimalPad)
+                        Picker("", selection: binding(\.paperUnit)) { ForEach(MeasureScaleSetting.paperUnitNames, id: \.self) { Text($0) } }.labelsHidden()
+                    }
+                    HStack {
+                        Text("=")
+                        TextField("Real world", value: value(\.worldValue), format: .number).keyboardType(.decimalPad)
+                        Picker("", selection: binding(\.worldUnit)) { ForEach(MeasureScaleSetting.worldUnits, id: \.self) { Text($0) } }.labelsHidden()
+                    }
+                    Picker("Precision", selection: binding(\.precision)) { ForEach(0...3, id: \.self) { Text("\($0)") } }
+                } header: {
+                    Text(selected?.measure != nil ? "Scale (also applied to the selected measurement)" : "Scale")
+                } footer: {
+                    Text("Length on the page = length in the real world, e.g. 1 in = 10 ft.")
+                }
+                if let a = selected, a.kind == .distance {
+                    Section {
+                        HStack {
+                            TextField("Real length in \(scale.worldUnit)", text: $realLength).keyboardType(.decimalPad)
+                            Button("Calibrate") {
+                                guard let v = Double(realLength.replacingOccurrences(of: ",", with: ".")),
+                                      let (next, factor) = scale.calibrated(to: a, realLength: v) else { return }
+                                scale = next
+                                onChange(next, factor)
+                                realLength = ""
+                            }
+                        }
+                    } footer: {
+                        Text("Enter the real length of the selected distance measurement to set the scale from it.")
+                    }
+                }
+            }
+            .navigationTitle("Measurement scale")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Reset") { set(.default) } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func set(_ next: MeasureScaleSetting) {
+        scale = next
+        onChange(next, nil)
+    }
+
+    private func binding<T>(_ key: WritableKeyPath<MeasureScaleSetting, T>) -> Binding<T> {
+        Binding(get: { scale[keyPath: key] }, set: { var n = scale; n[keyPath: key] = $0; set(n) })
+    }
+
+    /// Positive numbers only, as the web's inputs.
+    private func value(_ key: WritableKeyPath<MeasureScaleSetting, Double>) -> Binding<Double> {
+        Binding(get: { scale[keyPath: key] }, set: { v in guard v > 0 else { return }; var n = scale; n[keyPath: key] = v; set(n) })
     }
 }
 

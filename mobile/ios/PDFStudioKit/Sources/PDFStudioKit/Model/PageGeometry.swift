@@ -50,6 +50,14 @@ public struct PageGeometry: Equatable, Sendable {
         return Box.spanning(a, c)
     }
 
+    /// Maps PDF user space to the page as displayed with a bottom-left origin and y up (rotation and crop applied),
+    /// as `PDFPage.transform(_:for:)` does.
+    public var displayTransform: CGAffineTransform {
+        func d(_ p: CGPoint) -> CGPoint { let q = toPage(p); return CGPoint(x: q.x, y: size.height - q.y) }
+        let o = d(.zero), u = d(CGPoint(x: 1, y: 0)), v = d(CGPoint(x: 0, y: 1))
+        return CGAffineTransform(a: u.x - o.x, b: u.y - o.y, c: v.x - o.x, d: v.y - o.y, tx: o.x, ty: o.y)
+    }
+
     /// An affine transform that maps a local, upright drawing space (origin at the bottom-left of
     /// `box` as displayed, y up, 1 unit = 1 pt) into PDF user space. Used to draw text and images
     /// that must look upright on rotated pages.

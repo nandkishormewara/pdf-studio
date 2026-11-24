@@ -211,11 +211,15 @@ public final class StudioDocument: ObservableObject {
 
     /// The document with annotations, either as editable PDF annotations or burned into the pages.
     public func pdfData(_ mode: SaveMode = .editable) -> Data? {
+        pdfData(mode, redactionMarks: mode == .editable)
+    }
+
+    private func pdfData(_ mode: SaveMode, redactionMarks: Bool) -> Data? {
         for a in annotations {
             if let annot = live[a.id] { AnnotationBridge.attachJSON(a, to: annot) }
         }
         // Redaction marks are instructions, never page content: keep them out of flattened output.
-        let marks = mode == .flattened ? annotations.filter { $0.kind == .redact }.compactMap { a in live[a.id].map { (a.page, $0) } } : []
+        let marks = !redactionMarks ? annotations.filter { $0.kind == .redact }.compactMap { a in live[a.id].map { (a.page, $0) } } : []
         for (_, annot) in marks { annot.page?.removeAnnotation(annot) }
         defer { for (page, annot) in marks { pdf.page(at: page)?.addAnnotation(annot) } }
         switch mode {
@@ -229,4 +233,41 @@ public final class StudioDocument: ObservableObject {
         }
     }
 
+    // MARK: - Redaction (server)
+
+    /// Redaction marks that `applyRedactions` sends to the server.
+    public var redactionMarks: [Annotation] { annotations.filter { $0.kind == .redact && $0.rect != nil } }
+
+    /// The marks as the server's `regions`: one entry per page (in order of first mark), rectangles in PDF user space
+    /// `[x1, y1, x2, y2]`, and a mark's `text` (e.g. from search) as text to remove near its rectangle. Same as the web.
+    public func redactionRegions() -> [PDFStudioServer.RedactRegion] {
+        var regions: [PDFStudioServer.RedactRegion] = []
+        for m in redactionMarks {
+            guard let rect = m.rect else { continue }
+            let r = geometry(page: m.page).toPDF(rect)
+            let box = [Double(r.minX), Double(r.minY), Double(r.maxX), Double(r.maxY)]
+            var region = regions.first { $0.page == m.page } ?? PDFStudioServer.RedactRegion(page: m.page, rects: [])
+            region.rects.append(box)
+            if let t = m.text, !t.isEmpty { region.texts.append(.init(text: t, near: box)) }
+            if let i = regions.firstIndex(where: { $0.page == m.page }) { regions[i] = region } else { regions.append(region) }
+        }
+        return regions
+    }
+
+    /// Sends the document (every other annotation kept as editable annotations, form values included) with its
+    /// redaction marks to a PDF Studio server's `/redact`, and opens the result: content under the marks is
+    /// removed for good, and with `sanitize` hidden information (metadata, scripts, attachments…) is cleaned too.
+    /// This document is left unchanged; the returned one (named "…-redacted.pdf") is what to save or share.
+    public func applyRedactions(using server: PDFStudioServer, sanitize: Bool = true,
+                                ocrLanguages: [String] = []) async throws -> (document: StudioDocument, report: PDFStudioServer.RedactReport) {
+        let regions = redactionRegions()
+        guard !regions.isEmpty else { throw PDFStudioServerError(message: "There are no redaction marks to apply.") }
+        guard let upload = pdfData(.editable, redactionMarks: false) else { throw PDFStudioServerError(message: "Couldn't write the document.") }
+        let result = try await server.redact(pdf: upload, regions: regions, sanitize: sanitize, ocrLanguages: ocrLanguages)
+        let base = name.lowercased().hasSuffix(".pdf") ? String(name.dropLast(4)) : name
+        guard let doc = StudioDocument(data: result.pdf, name: base + "-redacted.pdf") else {
+            throw PDFStudioServerError(message: "The server returned a PDF that couldn't be opened.")
+        }
+        return (doc, result.report)
+    }
 }

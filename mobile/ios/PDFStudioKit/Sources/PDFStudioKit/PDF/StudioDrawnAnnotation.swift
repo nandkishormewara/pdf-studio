@@ -14,6 +14,7 @@ final class StudioDrawnAnnotation: PDFAnnotation {
         guard let a = model, let g = geometry else { return }
         context.saveGState()
         defer { context.restoreGState() }
+        if Self.expectsDisplaySpace(context, g) { context.concatenate(g.displayTransform) }
         context.setAlpha(a.opacity)
         let color = CGColor(srgbRed: RGB(hex: a.color).r, green: RGB(hex: a.color).g, blue: RGB(hex: a.color).b, alpha: 1)
 
@@ -197,6 +198,19 @@ final class StudioDrawnAnnotation: PDFAnnotation {
         default:
             break
         }
+    }
+
+    /// iOS PDFKit renders page thumbnails (`PDFPage.thumbnail`, `PDFThumbnailView`) by calling `draw` with an
+    /// untransformed context the size of the page as displayed (y up), not in PDF user space: drawing as usual
+    /// there put marks on rotated or cropped pages turned and shifted. On screen and when saving, the context is
+    /// already in PDF user space (rotation/crop applied by PDFKit, or a translated appearance-stream context).
+    static func expectsDisplaySpace(_ context: CGContext, _ g: PageGeometry) -> Bool {
+        guard g.rotation != 0 || g.crop.origin != .zero else { return false }
+        let m = context.ctm
+        guard m.b == 0, m.c == 0, m.tx == 0, m.ty == 0, m.a > 0, m.d > 0 else { return false }
+        let clip = context.boundingBoxOfClipPath
+        return abs(clip.minX) < 0.5 && abs(clip.minY) < 0.5
+            && abs(clip.width - g.size.width) < 1 && abs(clip.height - g.size.height) < 1
     }
 
     private func arrowHead(from a: Pt, to b: Pt, width: Double) -> [Pt] {

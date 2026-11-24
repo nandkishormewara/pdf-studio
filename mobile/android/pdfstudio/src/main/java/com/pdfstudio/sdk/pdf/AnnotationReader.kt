@@ -9,11 +9,14 @@ import com.pdfstudio.sdk.PdfPoint
 import com.pdfstudio.sdk.PdfRect
 import com.pdfstudio.sdk.Pt
 import com.pdfstudio.sdk.Rgb
+import com.pdfstudio.sdk.RichText
 import com.pdfstudio.sdk.Xfdf
 import com.tom_roush.pdfbox.cos.COSArray
 import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.cos.COSNumber
+import com.tom_roush.pdfbox.cos.COSStream
+import com.tom_roush.pdfbox.cos.COSString
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 
 /**
@@ -107,14 +110,24 @@ object AnnotationReader {
                 val da = d.getString(COSName.DA).orEmpty()
                 val size = Regex("""([\d.]+)\s+Tf""").find(da)?.groupValues?.get(1)?.toDoubleOrNull() ?: 12.0
                 val rgb = Regex("""([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg""").find(da)?.groupValues
-                base.copy(kind = AnnotationKind.FREETEXT, rect = rect, text = base.comment.orEmpty(), comment = null, fontSize = size,
-                    color = rgb?.let { Rgb(it[1].toDouble(), it[2].toDouble(), it[3].toDouble()).hex } ?: color ?: "#111111", opacity = 1.0)
+                val textColor = rgb?.let { Rgb(it[1].toDouble(), it[2].toDouble(), it[3].toDouble()).hex } ?: color ?: "#111111"
+                // /RC: bold / italic / underlined / coloured words (Acrobat, Apryse, the web SDK). Kept only when it adds styling.
+                val runs = richContents(d)?.let { RichText.fromXhtml(it) }?.let { RichText.relativeTo(it, textColor) }
+                base.copy(kind = AnnotationKind.FREETEXT, rect = rect, text = runs?.let(RichText::plainText) ?: base.comment.orEmpty(), comment = null,
+                    fontSize = size, color = textColor, opacity = 1.0, richText = runs?.takeUnless { RichText.isPlain(it, textColor) })
             }
             "Text" -> base.copy(kind = AnnotationKind.NOTE, rect = Box(rect.x, rect.y, 22.0, 22.0), color = color ?: "#ffd84d", opacity = 1.0)
             "Redact" -> base.copy(kind = AnnotationKind.REDACT, rect = rect, color = "#e5484d", opacity = 1.0)
             else -> null
         }
     }
+
+    /** `/RC` as text: a text string, or (PDF 1.5+) a stream. */
+    private fun richContents(d: COSDictionary): String? = when (val rc = d.getDictionaryObject(COSName.getPDFName("RC"))) {
+        is COSString -> rc.string
+        is COSStream -> runCatching { rc.createInputStream().use { String(it.readBytes(), Charsets.UTF_8) } }.getOrNull()
+        else -> null
+    }?.takeIf { it.isNotBlank() }
 
     @Suppress("unused") private fun pt(x: Double, y: Double) = Pt(x, y)
 }

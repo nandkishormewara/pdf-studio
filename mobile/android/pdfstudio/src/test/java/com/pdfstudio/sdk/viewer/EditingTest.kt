@@ -3,7 +3,9 @@ package com.pdfstudio.sdk.viewer
 import com.pdfstudio.sdk.Annotation
 import com.pdfstudio.sdk.AnnotationKind
 import com.pdfstudio.sdk.Box
+import com.pdfstudio.sdk.Measure
 import com.pdfstudio.sdk.Pt
+import com.pdfstudio.sdk.ScaleSetting
 import com.pdfstudio.sdk.ReviewStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -77,12 +79,43 @@ class EditingTest {
     }
 
     @Test fun historyUndoesInOrderAndForgetsTheOldest() {
-        val h = EditHistory(limit = 2)
+        val h = EditHistory<List<Annotation>>(limit = 2)
         assertFalse(h.canUndo); assertNull(h.undo())
         val x = Annotation(page = 0, kind = AnnotationKind.NOTE, color = "#ffcd45", rect = Box(0.0, 0.0, 1.0, 1.0), author = "A")
         h.record(emptyList()); h.record(listOf(x)); h.record(listOf(x, x))
         assertEquals(listOf(x, x), h.undo())
         assertEquals(listOf(x), h.undo())
         assertNull(h.undo())
+    }
+
+    private val scale = ScaleSetting().toMeasureScale()
+
+    @Test fun distanceDragMakesAMeasurementWithTheScale() {
+        val d = Editing.shape(Tool.DISTANCE, 1, listOf(Pt(0.0, 0.0), Pt(40.0, 0.0), Pt(72.0, 0.0)), "#1f6feb", "User 1", scale)!!
+        assertEquals(AnnotationKind.DISTANCE, d.kind); assertEquals(listOf(Pt(0.0, 0.0), Pt(72.0, 0.0)), d.points)
+        assertEquals(scale, d.measure); assertEquals(1.0, d.opacity, 0.0); assertEquals("1.00 in", Measure.label(d))
+        assertNull(Editing.shape(Tool.DISTANCE, 1, listOf(Pt(0.0, 0.0), Pt(2.0, 0.0)), "#1f6feb", "User 1", scale))
+        assertNull(Editing.shape(Tool.DISTANCE, 1, drag, "#1f6feb", "User 1", measure = null))
+        assertTrue(Tool.DISTANCE.drag && Tool.DISTANCE.measures && !Tool.DISTANCE.placesPoints)
+        assertTrue(!Tool.AREA.drag && Tool.AREA.placesPoints && Tool.PERIMETER.placesPoints)
+    }
+
+    @Test fun perimeterAndAreaNeedEnoughPointsAndDropDoubleTaps() {
+        val pts = listOf(Pt(0.0, 0.0), Pt(72.0, 0.0), Pt(73.0, 1.0), Pt(72.0, 72.0))
+        val area = Editing.polygon(Tool.AREA, 0, pts, "#2f9e44", "User 1", scale)!!
+        assertEquals(AnnotationKind.AREA, area.kind); assertEquals(listOf(Pt(0.0, 0.0), Pt(72.0, 0.0), Pt(72.0, 72.0)), area.points)
+        assertEquals("0.50 in²", Measure.label(area))
+        val per = Editing.polygon(Tool.PERIMETER, 0, pts.take(2), "#2f9e44", "User 1", scale)!!
+        assertEquals(AnnotationKind.PERIMETER, per.kind); assertEquals("1.00 in", Measure.label(per))
+        assertNull(Editing.polygon(Tool.AREA, 0, pts.take(2), "#2f9e44", "User 1", scale))
+        assertNull(Editing.polygon(Tool.PERIMETER, 0, listOf(Pt(5.0, 5.0), Pt(6.0, 6.0)), "#2f9e44", "User 1", scale))
+        assertNull(Editing.polygon(Tool.PEN, 0, pts, "#2f9e44", "User 1", scale))
+    }
+
+    @Test fun tappingTheFirstPointClosesTheShape() {
+        val pts = listOf(Pt(100.0, 100.0), Pt(200.0, 100.0), Pt(200.0, 200.0))
+        assertTrue(Editing.closesPolygon(pts, Pt(105.0, 96.0), slop = 8.0))
+        assertFalse(Editing.closesPolygon(pts, Pt(120.0, 100.0), slop = 8.0))
+        assertFalse(Editing.closesPolygon(pts.take(2), Pt(100.0, 100.0), slop = 8.0))
     }
 }

@@ -48,6 +48,119 @@ public enum Measure {
     }
 }
 
+extension Measure {
+    /// Real-world units per PDF point that make the distance measurement `a` read `realLength` (web `calibrate`).
+    public static func calibrate(_ a: Annotation, realLength: Double) -> Double {
+        let len = length(a.points ?? [])
+        return len > 0 ? realLength / len : 0
+    }
+
+    /// A distance measurement dragged from `start` to `end`, or nil for a tap (shorter than 4 page units both ways,
+    /// as on the web).
+    public static func distance(page: Int, from start: Pt, to end: Pt, scale: MeasureScale, color: String,
+                                strokeWidth: Double, author: String) -> Annotation? {
+        guard abs(end.x - start.x) >= 4 || abs(end.y - start.y) >= 4 else { return nil }
+        return Annotation(page: page, kind: .distance, color: color, opacity: 1, strokeWidth: strokeWidth,
+                          points: [start, end], measure: scale, author: author)
+    }
+}
+
+/// The scale used for new measurements: `paperValue paperUnit` on the page stands for `worldValue worldUnit`
+/// (web `ScaleSetting`, same defaults: 1 in = 1 in, 2 decimals).
+public struct MeasureScaleSetting: Codable, Hashable, Sendable {
+    public var paperValue: Double
+    public var paperUnit: String
+    public var worldValue: Double
+    public var worldUnit: String
+    public var precision: Int
+
+    public init(paperValue: Double = 1, paperUnit: String = "in", worldValue: Double = 1, worldUnit: String = "in", precision: Int = 2) {
+        self.paperValue = paperValue; self.paperUnit = paperUnit; self.worldValue = worldValue; self.worldUnit = worldUnit
+        self.precision = precision
+    }
+
+    public static let `default` = MeasureScaleSetting()
+    /// PDF points per unit of paper measurement.
+    public static let paperUnits: [String: Double] = ["in": 72, "cm": 72 / 2.54, "mm": 72 / 25.4, "pt": 1]
+    public static let paperUnitNames = ["in", "cm", "mm", "pt"]
+    public static let worldUnits = ["in", "ft", "yd", "mi", "mm", "cm", "m", "km", "pt"]
+
+    /// The `measure` stored on new measurements.
+    public var measureScale: MeasureScale {
+        MeasureScale(factor: worldValue / (paperValue * (Self.paperUnits[paperUnit] ?? 72)), unit: worldUnit, precision: precision)
+    }
+
+    /// "1 in = 10 ft"
+    public var summary: String { "\(Self.number(paperValue)) \(paperUnit) = \(Self.number(worldValue)) \(worldUnit)" }
+
+    /// The setting (and exact factor) that makes the distance measurement `a` read `realLength` world units,
+    /// expressed per inch of paper, as the web's Calibrate does. Nil when `a` has no length or `realLength` <= 0.
+    public func calibrated(to a: Annotation, realLength: Double) -> (setting: MeasureScaleSetting, factor: Double)? {
+        let factor = Measure.calibrate(a, realLength: realLength)
+        guard realLength > 0, factor > 0 else { return nil }
+        var next = self
+        next.paperValue = 1
+        next.paperUnit = "in"
+        next.worldValue = Double(String(format: "%.6g", factor * 72)) ?? factor * 72
+        return (next, factor)
+    }
+
+    /// JS-style number text: 1 → "1", 0.5 → "0.5".
+    static func number(_ v: Double) -> String {
+        v == v.rounded() && abs(v) < 1e15 ? String(Int(v)) : String(v)
+    }
+
+    public init(from decoder: Decoder) throws {
+        // tolerate partial settings saved by other versions (web merges over its defaults the same way)
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = MeasureScaleSetting.default
+        paperValue = (try? c.decode(Double.self, forKey: .paperValue)) ?? d.paperValue
+        paperUnit = (try? c.decode(String.self, forKey: .paperUnit)) ?? d.paperUnit
+        worldValue = (try? c.decode(Double.self, forKey: .worldValue)) ?? d.worldValue
+        worldUnit = (try? c.decode(String.self, forKey: .worldUnit)) ?? d.worldUnit
+        precision = (try? c.decode(Int.self, forKey: .precision)) ?? d.precision
+    }
+}
+
+/// A perimeter or area measurement being placed point by point (tap, tap, … then finish).
+public struct MeasureDraft: Equatable, Sendable {
+    public let kind: AnnotationKind
+    public let page: Int
+    public private(set) var points: [Pt] = []
+
+    /// Nil unless `kind` is `.perimeter` or `.area`.
+    public init?(kind: AnnotationKind, page: Int) {
+        guard kind == .perimeter || kind == .area else { return nil }
+        self.kind = kind; self.page = page
+    }
+
+    /// Points needed before the measurement can be finished: 2 for a perimeter, 3 for an area.
+    public var minimumPoints: Int { kind == .area ? 3 : 2 }
+    public var canFinish: Bool { points.count >= minimumPoints }
+
+    /// Adds a vertex; one within 2 page units of the previous vertex is ignored (a double tap, as on the web).
+    @discardableResult
+    public mutating func add(_ p: Pt) -> Bool {
+        if let last = points.last, hypot(p.x - last.x, p.y - last.y) <= 2 { return false }
+        points.append(p)
+        return true
+    }
+
+    public mutating func removeLast() { _ = points.popLast() }
+
+    /// The finished measurement, or nil while there are too few points.
+    public func annotation(scale: MeasureScale, color: String, strokeWidth: Double, author: String) -> Annotation? {
+        guard canFinish else { return nil }
+        return Annotation(page: page, kind: kind, color: color, opacity: 1, strokeWidth: strokeWidth, points: points,
+                          measure: scale, author: author)
+    }
+
+    /// The label the measurement would have now (e.g. while placing points).
+    public func label(scale: MeasureScale) -> String {
+        Measure.label(Annotation(page: page, kind: kind, color: "#000000", points: points, measure: scale, author: ""))
+    }
+}
+
 /// `#rrggbb` <-> components.
 public struct RGB: Equatable, Sendable {
     public var r: Double, g: Double, b: Double

@@ -4,19 +4,25 @@ import PDFKit
 import UIKit
 
 public enum StudioTool: String, CaseIterable, Identifiable, Sendable {
-    case select, highlight, underline, strikeout, freetext, note, ink, rect, ellipse, line, arrow, stamp, signature, redact
+    case select, highlight, underline, strikeout, freetext, note, ink, rect, ellipse, line, arrow, stamp, signature
+    case distance, perimeter, area, redact
 
     public var id: String { rawValue }
     var kind: AnnotationKind? { AnnotationKind(rawValue: rawValue) }
     /// Tools that draw on the page with touches (as opposed to text selection or tapping annotations).
     var drawsOnPage: Bool { self != .select && !isTextMarkup }
     var isTextMarkup: Bool { self == .highlight || self == .underline || self == .strikeout }
+    /// Distance, perimeter and area: new marks get the viewer's measurement scale.
+    public var isMeasurement: Bool { self == .distance || self == .perimeter || self == .area }
+    /// Perimeter and area: placed by tapping points, then finished (`StudioPDFView.finishMeasurement()`).
+    public var placesPoints: Bool { self == .perimeter || self == .area }
 
     public var title: String {
         switch self {
         case .select: "Select"; case .highlight: "Highlight"; case .underline: "Underline"; case .strikeout: "Strikeout"
         case .freetext: "Text"; case .note: "Note"; case .ink: "Pen"; case .rect: "Rectangle"; case .ellipse: "Ellipse"
         case .line: "Line"; case .arrow: "Arrow"; case .stamp: "Stamp"; case .signature: "Signature"; case .redact: "Redact"
+        case .distance: "Distance"; case .perimeter: "Perimeter"; case .area: "Area"
         }
     }
 
@@ -25,6 +31,7 @@ public enum StudioTool: String, CaseIterable, Identifiable, Sendable {
         case .select: "hand.point.up.left"; case .highlight: "highlighter"; case .underline: "underline"; case .strikeout: "strikethrough"
         case .freetext: "textformat"; case .note: "note.text"; case .ink: "pencil.tip"; case .rect: "rectangle"; case .ellipse: "circle"
         case .line: "line.diagonal"; case .arrow: "arrow.up.right"; case .stamp: "seal"; case .signature: "signature"; case .redact: "rectangle.fill.badge.xmark"
+        case .distance: "ruler"; case .perimeter: "point.3.connected.trianglepath.dotted"; case .area: "pentagon"
         }
     }
 }
@@ -91,6 +98,16 @@ public final class StudioPDFView: UIView, UIGestureRecognizerDelegate {
     /// Called when a tool that places one item (note, stamp, signature) has been used.
     public var onToolFinished: (() -> Void)?
     public var onSelectionChanged: ((Bool) -> Void)?
+    /// Scale given to new distance, perimeter and area measurements.
+    public var measureScale = MeasureScaleSetting.default
+    /// The perimeter or area being placed (points tapped so far), or nil.
+    public private(set) var measureDraft: MeasureDraft? {
+        didSet { if measureDraft != oldValue { updateOverlays(); onMeasureDraftChanged?(measureDraft) } }
+    }
+    public var onMeasureDraftChanged: ((MeasureDraft?) -> Void)?
+    private let pointTap = UITapGestureRecognizer()
+    private let draftLayer = CAShapeLayer()
+    private let draftLabel = CATextLayer()
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -114,8 +131,23 @@ public final class StudioPDFView: UIView, UIGestureRecognizerDelegate {
         selectionLayer.lineWidth = 1.5
         selectionLayer.lineDashPattern = [5, 3]
         overlay.layer.addSublayer(selectionLayer)
+        draftLayer.fillColor = UIColor.clear.cgColor
+        draftLayer.lineCap = .round
+        draftLayer.lineJoin = .round
+        overlay.layer.addSublayer(draftLayer)
+        draftLabel.fontSize = 12
+        draftLabel.alignmentMode = .center
+        draftLabel.backgroundColor = UIColor.white.withAlphaComponent(0.9).cgColor
+        draftLabel.cornerRadius = 3
+        draftLabel.contentsScale = UIScreen.main.scale
+        draftLabel.isHidden = true
+        overlay.layer.addSublayer(draftLabel)
         overlay.host = self
         overlay.isUserInteractionEnabled = false
+        // perimeter / area vertices: a recogniser also catches very quick taps that raw touches can lose
+        pointTap.addTarget(self, action: #selector(handlePointTap(_:)))
+        pointTap.isEnabled = false
+        overlay.addGestureRecognizer(pointTap)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         tap.delegate = self
@@ -132,7 +164,7 @@ public final class StudioPDFView: UIView, UIGestureRecognizerDelegate {
         pdfView.onMarkup = { [weak self] kind in self?.applyMarkup(kind) }
         NotificationCenter.default.publisher(for: .PDFViewScaleChanged, object: pdfView)
             .merge(with: NotificationCenter.default.publisher(for: .PDFViewPageChanged, object: pdfView))
-            .sink { [weak self] _ in self?.updateSelectionOutline() }.store(in: &bag)
+            .sink { [weak self] _ in self?.updateOverlays() }.store(in: &bag)
         NotificationCenter.default.publisher(for: .PDFViewSelectionChanged, object: pdfView)
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -148,23 +180,24 @@ public final class StudioPDFView: UIView, UIGestureRecognizerDelegate {
         super.layoutSubviews()
         if scrollObservation == nil, let scroll = pdfView.firstSubview(of: UIScrollView.self) {
             scrollObservation = scroll.observe(\.contentOffset) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.updateSelectionOutline() }
+                MainActor.assumeIsolated { self?.updateOverlays() }
             }
             if let movePan { scroll.panGestureRecognizer.require(toFail: movePan) }
         }
-        updateSelectionOutline()
+        updateOverlays()
     }
 
     public func setDocument(_ doc: StudioDocument?) {
         guard doc !== document else { return }
         document = doc
+        measureDraft = nil
         pdfView.document = doc?.pdf
         bag.removeAll()
-        doc?.$selectedID.sink { [weak self] _ in DispatchQueue.main.async { self?.updateSelectionOutline() } }.store(in: &bag)
-        doc?.$annotations.sink { [weak self] _ in DispatchQueue.main.async { self?.updateSelectionOutline() } }.store(in: &bag)
+        doc?.$selectedID.sink { [weak self] _ in DispatchQueue.main.async { self?.updateOverlays() } }.store(in: &bag)
+        doc?.$annotations.sink { [weak self] _ in DispatchQueue.main.async { self?.updateOverlays() } }.store(in: &bag)
         NotificationCenter.default.publisher(for: .PDFViewScaleChanged, object: pdfView)
             .merge(with: NotificationCenter.default.publisher(for: .PDFViewPageChanged, object: pdfView))
-            .sink { [weak self] _ in self?.updateSelectionOutline() }.store(in: &bag)
+            .sink { [weak self] _ in self?.updateOverlays() }.store(in: &bag)
         NotificationCenter.default.publisher(for: .PDFViewSelectionChanged, object: pdfView)
             .sink { [weak self] _ in
                 guard let self else { return }
@@ -191,8 +224,10 @@ public final class StudioPDFView: UIView, UIGestureRecognizerDelegate {
 
     private func toolChanged() {
         let t = isReadOnly ? .select : tool
+        if let d = measureDraft, d.kind.rawValue != t.rawValue { measureDraft = nil }
         updateBackGesture()
         overlay.isUserInteractionEnabled = t.drawsOnPage
+        pointTap.isEnabled = t.placesPoints
         pdfView.markupEnabled = !isReadOnly
         if isReadOnly { document?.selectedID = nil }
         overlay.resetPreview()
@@ -290,7 +325,8 @@ public final class StudioPDFView: UIView, UIGestureRecognizerDelegate {
         g !== movePan
     }
 
-    private func updateSelectionOutline() {
+    private func updateOverlays() {
+        updateDraftPreview()
         guard !isReadOnly, let doc = document, let id = doc.selectedID, let a = doc.annotation(id: id),
               let r = viewRect(a.bounds.insetBy(-3 / max(zoom, 0.1)), page: a.page) else {
             selectionLayer.path = nil
@@ -298,6 +334,76 @@ public final class StudioPDFView: UIView, UIGestureRecognizerDelegate {
         }
         selectionLayer.frame = overlay.bounds
         selectionLayer.path = UIBezierPath(roundedRect: overlay.convert(r, from: self), cornerRadius: 3).cgPath
+    }
+
+    // MARK: - Measurements placed point by point
+
+    /// Adds a vertex to the perimeter or area being placed (starting one if needed). Points on another page than
+    /// the first are ignored.
+    func addMeasurePoint(page: Int, _ p: Pt) {
+        guard tool.placesPoints, let kind = tool.kind else { return }
+        var d = measureDraft ?? MeasureDraft(kind: kind, page: page)!
+        guard d.page == page else { return }
+        d.add(p)
+        measureDraft = d
+    }
+
+    @objc private func handlePointTap(_ g: UITapGestureRecognizer) {
+        guard let (page, p) = pageLocation(g.location(in: self)) else { return }
+        addMeasurePoint(page: page, p)
+    }
+
+    /// Adds the perimeter or area being placed to the document (when it has enough points) and starts over.
+    public func finishMeasurement() {
+        guard let d = measureDraft, d.canFinish, let doc = document else { return }
+        measureDraft = nil
+        if let a = d.annotation(scale: measureScale.measureScale, color: style.color, strokeWidth: style.strokeWidth, author: author) {
+            doc.add(a)
+        }
+    }
+
+    public func cancelMeasurement() { measureDraft = nil }
+
+    public func removeLastMeasurePoint() {
+        guard var d = measureDraft else { return }
+        d.removeLast()
+        measureDraft = d.points.isEmpty ? nil : d
+    }
+
+    /// Page-unit point on `page` in this view's coordinates.
+    func viewPoint(_ p: Pt, page index: Int) -> CGPoint? {
+        guard let doc = document, let page = doc.pdf.page(at: index) else { return nil }
+        return convert(pdfView.convert(doc.geometry(page: index).toPDF(p), from: page), from: pdfView)
+    }
+
+    private func updateDraftPreview() {
+        guard let d = measureDraft, !d.points.isEmpty else {
+            draftLayer.path = nil
+            draftLabel.isHidden = true
+            return
+        }
+        let pts = d.points.compactMap { viewPoint($0, page: d.page) }.map { overlay.convert($0, from: self) }
+        let path = UIBezierPath()
+        path.move(to: pts[0])
+        pts.dropFirst().forEach { path.addLine(to: $0) }
+        if d.kind == .area, pts.count > 2 { path.close() }
+        for p in pts { path.append(UIBezierPath(ovalIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6))) }
+        let color = UIColor(hex: style.color)
+        draftLayer.frame = overlay.bounds
+        draftLayer.strokeColor = color.cgColor
+        draftLayer.fillColor = d.kind == .area && pts.count > 2 ? color.withAlphaComponent(0.15).cgColor : UIColor.clear.cgColor
+        draftLayer.lineWidth = max(1, style.strokeWidth * zoom)
+        draftLayer.path = path.cgPath
+        draftLabel.isHidden = d.points.count < 2
+        guard d.points.count >= 2 else { return }
+        let label = d.label(scale: measureScale.measureScale)
+        draftLabel.string = label
+        draftLabel.foregroundColor = color.cgColor
+        let anchor = pts.last!
+        let w = CGFloat(label.count) * 7 + 10
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        draftLabel.frame = CGRect(x: anchor.x - w / 2, y: anchor.y - 28, width: w, height: 17)
+        CATransaction.commit()
     }
 
     // MARK: - Text markup
@@ -347,6 +453,9 @@ public final class StudioPDFView: UIView, UIGestureRecognizerDelegate {
             guard let img = signatureImage else { return nil }
             a.kind = .signature; a.image = img; a.color = "#000000"; a.opacity = 1
             a.rect = tiny ? Box(x: start.x, y: start.y, w: 160, h: 60) : r
+        case .distance:
+            return Measure.distance(page: page, from: start, to: end, scale: measureScale.measureScale, color: style.color,
+                                    strokeWidth: style.strokeWidth, author: author)
         case .redact:
             guard !tiny else { return nil }
             a.kind = .redact; a.rect = r; a.color = "#e5484d"; a.opacity = 1; a.strokeWidth = 1
@@ -439,8 +548,10 @@ final class DrawingOverlay: UIView {
         switch host.tool {
         case .ink:
             p.move(to: screenPath[0]); screenPath.dropFirst().forEach { p.addLine(to: $0) }
-        case .line, .arrow:
+        case .line, .arrow, .distance:
             p.move(to: startScreen); p.addLine(to: cur)
+        case .perimeter, .area:
+            return
         case .ellipse:
             p.append(UIBezierPath(ovalIn: CGRect(x: min(startScreen.x, cur.x), y: min(startScreen.y, cur.y), width: abs(cur.x - startScreen.x), height: abs(cur.y - startScreen.y))))
         default:
@@ -452,6 +563,7 @@ final class DrawingOverlay: UIView {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         defer { resetPreview() }
         guard let host, let s = start, let t = touches.first else { return }
+        if host.tool.placesPoints { return } // points are placed by `pointTap`
         let end = host.pageLocation(t.location(in: host)).flatMap { $0.0 == page ? $0.1 : nil } ?? path.last ?? s
         if let a = host.makeAnnotation(page: page, start: s, end: end, path: path) { host.commit(a) }
     }

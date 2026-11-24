@@ -36,6 +36,16 @@ final class GeometryTests: XCTestCase {
         }
     }
 
+    func testDisplayTransformMatchesPageUnits() {
+        for rot in [0, 90, 180, 270] {
+            let g = PageGeometry(crop: CGRect(x: 10, y: 20, width: 500, height: 700), rotation: rot)
+            for p in [Pt(x: 0, y: 0), Pt(x: 30, y: 40), Pt(x: 123, y: 456)] {
+                let d = g.toPDF(p).applying(g.displayTransform)
+                assertClose(d.x, p.x, 0.0001, "rot \(rot) x"); assertClose(d.y, g.size.height - p.y, 0.0001, "rot \(rot) y")
+            }
+        }
+    }
+
     func testUprightTransformKeepsContentUpright() {
         // On a page rotated 90°, "right" on screen must map to +y in PDF space.
         let g = PageGeometry(crop: CGRect(x: 0, y: 0, width: 612, height: 792), rotation: 90)

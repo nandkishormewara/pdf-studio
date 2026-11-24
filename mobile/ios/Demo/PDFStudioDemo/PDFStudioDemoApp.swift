@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var opened: StudioDocument?
     @State private var importing = false
     @State private var error: String?
+    @AppStorage("pdfstudio.serverURL") private var serverURL = ""
 
     var body: some View {
         NavigationStack {
@@ -20,11 +21,20 @@ struct ContentView: View {
                 Section {
                     NavigationLink("Sample document") { EditorScreen(document: Samples.editorDocument()) }
                     NavigationLink("Annotations from the web app (JSON)") { EditorScreen(document: Samples.webAnnotationsDocument()) }
+                    NavigationLink("Rotated pages") { EditorScreen(document: Samples.rotatedDocument()) }
                     Button("Open a PDF…") { importing = true }
                 } header: {
                     Text("Editor")
                 } footer: {
                     Text("All tools, undo/redo, search, comments, thumbnails, signatures; share as editable or flattened PDF, XFDF or JSON.")
+                }
+                Section {
+                    TextField("http://localhost:8787", text: $serverURL)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                } header: {
+                    Text("PDF Studio server (optional)")
+                } footer: {
+                    Text("With a server, redaction marks can be applied from the editor (run server/run.sh on this Mac for the simulator).")
                 }
                 Section {
                     NavigationLink("Reviewer-checked copy") { CheckedCopyScreen() }
@@ -54,8 +64,9 @@ extension StudioDocument: @retroactive Hashable {
 
 struct EditorScreen: View {
     @StateObject var document: StudioDocument
+    @AppStorage("pdfstudio.serverURL") private var serverURL = ""
     var body: some View {
-        PDFStudioEditor(document: document, author: "Demo user")
+        PDFStudioEditor(document: document, author: "Demo user", server: PDFStudioServer(string: serverURL))
             .navigationTitle(document.name)
             .navigationBarTitleDisplayMode(.inline)
     }

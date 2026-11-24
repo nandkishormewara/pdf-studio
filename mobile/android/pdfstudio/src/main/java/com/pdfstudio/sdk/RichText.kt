@@ -152,6 +152,26 @@ object RichText {
         return normalize(runs).ifEmpty { null }
     }
 
+    /**
+     * Parses a PDF `/RC` rich-text string (XHTML, optionally with an XML declaration, as Acrobat, Apryse and the web
+     * SDK write it) into runs; null when it is empty or not well-formed.
+     */
+    fun fromXhtml(xml: String): List<TextRun>? {
+        if (xml.isBlank()) return null
+        val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+            // No external entities: the string comes from a file.
+            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+            isExpandEntityReferences = false
+        }
+        // Some writers leave HTML entities XML doesn't define.
+        val text = xml.trim().replace("&nbsp;", "&#160;")
+        val doc = runCatching {
+            factory.newDocumentBuilder().apply { setErrorHandler(null) }.parse(org.xml.sax.InputSource(java.io.StringReader(text)))
+        }.getOrNull() ?: return null
+        return fromXhtml(doc.documentElement)
+    }
+
     private fun Element.descendantNamed(name: String): Element? {
         val list = getElementsByTagNameNS("*", name)
         return if (list.length > 0) list.item(0) as Element else null

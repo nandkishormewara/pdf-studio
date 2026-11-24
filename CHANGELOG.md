@@ -5,16 +5,28 @@ All notable changes are listed here. The project follows [semantic versioning](h
 ## Unreleased
 
 ### Web
-- Hindi (Devanagari) in saved marks is real PDF text instead of a picture: shaped with HarfBuzz and written in an
-  embedded Noto Sans Devanagari font with a ToUnicode map, so it can be selected, searched and copied, and flattened
-  copies are searchable. Other scripts still fall back to a picture. The SDK's `setTextShaper` lets host apps plug
-  in the same shaper.
+- Hindi (Devanagari), Arabic and Hebrew in saved marks are real PDF text instead of a picture: shaped with HarfBuzz,
+  laid out right-to-left where needed, and written in embedded Noto Sans fonts with a ToUnicode map, so they can be
+  selected, searched and copied, and flattened copies are searchable. Fonts load per script on first use and are
+  trimmed to the glyphs used (a short Hindi note adds about 5 KB). CJK and emoji still fall back to a picture. The
+  SDK's `setTextShaper` lets host apps plug in the same shaper.
+
+### iOS
+- Create distance, perimeter and area measurements in the viewer, with a scale setting and calibration.
+- Apply redactions through a PDF Studio server: `PDFStudioServer`, `StudioDocument.applyRedactions(using:)` and an
+  *Apply* action in the editor when a server is configured.
+- Marks drawn by PDF Studio stay upright on rotated and cropped pages in page thumbnails too.
 
 ### Android
 - Viewer tools: oval, line, arrow, text box and sticky note next to pen, highlighter and box, with a colour row.
 - Tap a mark to see its author and date, comment on it, set its review status or delete it; Undo covers every change.
 - Forms: `PdfStudio.readFormFields` / `PdfStudio.fillForm` (text, checkbox, radio, dropdown, list) and a Form sheet in
   the viewer whose values show on the page right away and are kept on save.
+- Page tools: rotate, delete and move pages in the Pages sheet (undoable, marks follow their page) and
+  `PdfStudio.editPages(source, output, ops)`.
+- Create distance, perimeter and area measurements in the viewer, with a scale setting.
+- Rich text in text boxes is written to and read from `/RC` (compatible with Acrobat, Apryse and the web), and saved
+  appearances are styled.
 
 ## 1.0.0 (2026-11-24)
 

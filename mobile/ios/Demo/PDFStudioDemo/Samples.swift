@@ -1,3 +1,4 @@
+import PDFKit
 import PDFStudioKit
 import UIKit
 
@@ -45,6 +46,25 @@ enum Samples {
         if let url = Bundle.main.url(forResource: "web-annotations", withExtension: "json"), let data = try? Data(contentsOf: url) {
             try? doc.importJSON(data)
         }
+        return doc
+    }
+
+    /// Pages turned 0°, 90°, 180° and 270°, each with free text, a stamp and a distance measurement:
+    /// everything must read upright as displayed.
+    static func rotatedDocument() -> StudioDocument {
+        let base = PDFDocument(data: pdfData(title: "Rotated pages"))!
+        for i in 2..<4 { base.insert(base.page(at: i % 2)!.copy() as! PDFPage, at: i) }
+        for i in 0..<4 { base.page(at: i)?.rotation = i * 90 }
+        let doc = StudioDocument(data: base.dataRepresentation()!, name: "rotated.pdf")!
+        for i in 0..<4 {
+            doc.add(Annotation(page: i, kind: .freetext, color: "#e5484d", rect: Box(x: 60, y: 60, w: 260, h: 30),
+                               text: "Page turned \(i * 90)° — upright text", fontSize: 14, author: "User 1"))
+            doc.add(Annotation(page: i, kind: .stamp, color: "#1f6feb", strokeWidth: 2.5, rect: Box(x: 60, y: 110, w: 140, h: 34),
+                               text: "APPROVED", author: "User 1"))
+            doc.add(Annotation(page: i, kind: .distance, color: "#7c3aed", points: [Pt(x: 60, y: 190), Pt(x: 276, y: 190)],
+                               measure: MeasureScale(factor: 1 / 72.0, unit: "in", precision: 2), author: "User 1"))
+        }
+        doc.selectedID = nil
         return doc
     }
 

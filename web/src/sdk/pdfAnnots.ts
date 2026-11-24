@@ -14,7 +14,7 @@ import type { PageViewport } from 'pdfjs-dist';
 import { arrowHead, ellipsePoints, hexToRgb01, normRect, rectPoints, textBox, textLayoutBox, textOrigin, uid } from './geometry';
 import { labelAnchor, measureLabel } from './measure';
 import { dataUrlToBytes, isLatin, renderRichTextImage, renderTextImage } from './textImage';
-import { EmbeddedFonts, getTextShaper, glyphHex, placeGlyphs, scriptRuns, textHex, type TextShaper } from './unicodeText';
+import { EmbeddedFonts, bidiRuns, getTextShaper, glyphHex, loadShapingFonts, placeGlyphs, textHex, visualLatin, type ShapingFonts } from './unicodeText';
 import { isPlainRuns, plainText, relativeTo, runsToLines, runsToXhtml, xhtmlToRuns } from './richtext';
 import type { TextRun } from './richtext';
 import type { Annotation, Pt, Rect } from './types';
@@ -68,8 +68,8 @@ interface Env {
   helvBold: PDFFont;
   helvItalic: PDFFont;
   helvBoldItalic: PDFFont;
-  /** shapes non-Latin text into real PDF text; null → such text is drawn as an image */
-  shaper: TextShaper | null;
+  /** fonts for shaping non-Latin text into real PDF text; null → such text is drawn as an image */
+  shaping: ShapingFonts | null;
   fonts: EmbeddedFonts;
 }
 
@@ -78,11 +78,13 @@ interface Piece { text: string; bold?: boolean; italic?: boolean; underline?: bo
 
 /**
  * Writes lines of styled pieces as real text: Latin runs in Helvetica, other scripts shaped into the embedded Unicode
- * font. Returns the drawn size, or null (nothing written) when there is no shaper or the font lacks a character.
+ * fonts (one per script). Each line is put in visual order first (bidi: the line's direction comes from its first
+ * strong character; Arabic and Hebrew runs read right to left, with Latin words and numbers inside them left to
+ * right). Returns the drawn size, or null (nothing written) when there is no shaper or no font for a character.
  */
 function drawShapedLines(env: Env, b: Built, lines: Piece[][], topLeft: Pt, size: number): { w: number; h: number } | null {
-  const shaper = env.shaper;
-  if (!shaper) return null;
+  const shaping = env.shaping;
+  if (!shaping) return null;
   type Item =
     | { latin: true; piece: Piece; text: string; font: PDFFont; name: string; w: number }
     | { latin: false; piece: Piece; text: string; placed: NonNullable<ReturnType<typeof placeGlyphs>>; w: number };
@@ -91,16 +93,20 @@ function drawShapedLines(env: Env, b: Built, lines: Piece[][], topLeft: Pt, size
   const laid: Item[][] = [];
   for (const line of lines) {
     const items: Item[] = [];
-    for (const piece of line) {
-      for (const run of scriptRuns(piece.text)) {
-        if (run.latin) {
-          const [font, name] = helvFace(piece);
-          items.push({ latin: true, piece, text: run.text, font, name, w: font.widthOfTextAtSize(run.text, size) });
-        } else {
-          const placed = placeGlyphs(piece.bold ? shaper.bold : shaper.regular, run.text, size);
-          if (!placed) return null;
-          items.push({ latin: false, piece, text: run.text, placed, w: placed.width });
-        }
+    for (const run of bidiRuns(line.map((p) => p.text), shaping.defaultScript)) {
+      const piece = line[run.piece];
+      if (run.latin) {
+        const [font, name] = helvFace(piece);
+        const text = visualLatin(run);
+        items.push({ latin: true, piece, text, font, name, w: font.widthOfTextAtSize(text, size) });
+      } else {
+        const script = run.script;
+        if (script === 'other' || script === 'common' || script === 'latin') return null;
+        const fonts = shaping.fonts.get(script);
+        if (!fonts) return null;
+        const placed = placeGlyphs(piece.bold ? fonts.bold : fonts.regular, run.text, size, run.rtl, script);
+        if (!placed) return null;
+        items.push({ latin: false, piece, text: run.text, placed, w: placed.width });
       }
     }
     laid.push(items);
@@ -119,16 +125,46 @@ function drawShapedLines(env: Env, b: Built, lines: Piece[][], topLeft: Pt, size
       } else {
         const { name, ref, codes } = env.fonts.use(it.placed.font, it.placed.glyphs);
         b.resources.Font[name] = ref;
-        // Each glyph at its shaped position (marks carry their own offsets); text space is page units here.
-        const ops: string[] = [];
-        let px = 0, py = 0;
-        it.placed.glyphs.forEach((g, i) => {
-          ops.push(`${f(g.x - px)} ${f(g.dy - py)} Td ${glyphHex([codes[i]])} Tj`);
-          px = g.x; py = g.dy;
-        });
         const { o, u, v } = basis(env.vp, { x, y: baseline });
-        // ActualText gives readers the exact text of the run (copy, search), whatever the glyph order.
-        b.content.push(`/Span <</ActualText ${textHex(it.text)}>> BDC BT /${name} ${f(size)} Tf ${color} ${f(u.x)} ${f(u.y)} ${f(v.x)} ${f(v.y)} ${f(o.x)} ${f(o.y)} Tm ${ops.join(' ')} ET EMC`);
+        const start = `BT /${name} ${f(size)} Tf ${color} ${f(u.x)} ${f(u.y)} ${f(v.x)} ${f(v.y)} ${f(o.x)} ${f(o.y)} Tm`;
+        // The glyphs that carry the text go in one TJ, on the baseline, with adjustments for the shaped positions: one
+        // text object per run, which readers keep together and (for right-to-left runs) reverse as a whole.
+        const font = it.placed.font;
+        const width = (gid: number) => (Math.round((font.advance(gid) * 1000) / font.upem) * size) / 1000;
+        const tj: string[] = [];
+        let pen = 0;
+        it.placed.glyphs.forEach((g, i) => {
+          if (!g.carrier) return;
+          const adjust = Math.round(((pen - g.x) * 1000) / size);
+          if (adjust) tj.push(String(adjust));
+          tj.push(glyphHex([codes[i]]));
+          pen = g.x + width(g.gid);
+        });
+        // Marks and dots that read as nothing are drawn as shapes, each at its shaped position: as glyphs they would
+        // still be text to readers, and their offsets above and below the line break up lines and words in PDFium.
+        const shapes: string[] = [];
+        const glyphOps: string[] = [];
+        let px = 0, py = 0;
+        const k = size / font.upem;
+        it.placed.glyphs.forEach((g, i) => {
+          if (g.carrier) return;
+          const outline = font.outline?.(g.gid);
+          if (outline === null) return; // empty glyph
+          if (outline) {
+            const ox = o.x + u.x * g.x + v.x * g.dy, oy = o.y + u.y * g.x + v.y * g.dy;
+            shapes.push(`q ${f(u.x * k)} ${f(u.y * k)} ${f(v.x * k)} ${f(v.y * k)} ${f(ox)} ${f(oy)} cm ${outline} f Q`);
+          } else {
+            // a shaper without outlines: the glyph itself, in a second text object
+            glyphOps.push(`${f(g.x - px)} ${f(g.dy - py)} Td ${glyphHex([codes[i]])} Tj`);
+            px = g.x; py = g.dy;
+          }
+        });
+        const show = `${start} [${tj.join(' ')}] TJ ET` + (glyphOps.length ? ` ${start} ${glyphOps.join(' ')} ET` : '')
+          + (shapes.length ? ` q ${color} ${shapes.join(' ')} Q` : '');
+        // ActualText gives readers the exact text of a left-to-right run (copy, search), whatever the glyph order.
+        // Right-to-left runs go without: readers reorder extracted text themselves, from the glyphs' ToUnicode text,
+        // which is in visual order; a logical-order ActualText would be reversed a second time.
+        b.content.push(it.placed.rtl ? show : `/Span <</ActualText ${textHex(it.text)}>> BDC ${show} EMC`);
       }
       if (it.piece.underline) {
         const y = baseline + size * 0.12;
@@ -411,6 +447,8 @@ const SUBTYPE: Record<Annotation['kind'], string> = {
 
 export interface WriteOptions {
   mode: 'editable' | 'flatten';
+  /** embed only the glyphs used of fonts for non-Latin text (default true); false embeds whole font files */
+  subsetFonts?: boolean;
 }
 
 export async function writeAnnotations(doc: PDFDocument, viewports: PageViewport[], annotations: Annotation[], opts: WriteOptions) {
@@ -421,9 +459,10 @@ export async function writeAnnotations(doc: PDFDocument, viewports: PageViewport
   const pages = doc.getPages();
   const ctx = doc.context;
   let n = 0;
-  const needsShaping = annotations.some((a) => [a.text, a.comment, ...(a.richText ?? []).map((r) => r.text)].some((t) => t && !isLatin(t)));
-  const shaper = needsShaping ? await getTextShaper() : null;
-  const fonts = new EmbeddedFonts(ctx);
+  const texts = annotations.flatMap((a) => [a.text, a.comment, ...(a.richText ?? []).map((r) => r.text)]).filter((t): t is string => !!t && !isLatin(t));
+  // the shaper, and only the fonts of the scripts these marks use, load on first need
+  const shaping = texts.length ? await loadShapingFonts(await getTextShaper(), texts) : null;
+  const fonts = new EmbeddedFonts(ctx, { subset: opts.subsetFonts ?? true });
 
   for (const a of annotations) {
     const page = pages[a.page];
@@ -431,7 +470,7 @@ export async function writeAnnotations(doc: PDFDocument, viewports: PageViewport
     if (!page || !vp) continue;
     // Redaction marks are instructions, never page content; they travel as /Redact annotations.
     if (a.kind === 'redact' && opts.mode === 'flatten') continue;
-    const env: Env = { doc, vp, helv, helvBold, helvItalic, helvBoldItalic, shaper, fonts };
+    const env: Env = { doc, vp, helv, helvBold, helvItalic, helvBoldItalic, shaping, fonts };
     const built = await buildAppearance(env, a);
     const bbox = bboxOf(built.points, a.strokeWidth / 2 + 2);
     const res: Record<string, unknown> = {};
