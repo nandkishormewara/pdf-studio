@@ -43,7 +43,7 @@ final class DocumentTests: XCTestCase {
 
         let original = Dictionary(uniqueKeysWithValues: try sample().map { ($0.id, $0) })
         for a in foreign.annotations {
-            let o = try XCTUnwrap(original[a.id], "id \(a.id) not preserved via /NM")
+            let o = try XCTUnwrap(original[a.id], "\(a.kind) id \(a.id) not preserved via /NM; got \(foreign.annotations.map { "\($0.kind):\($0.id)" })")
             let (ab, ob) = (a.bounds, o.bounds)
             for (x, y, w) in [(ab.x, ob.x, "x"), (ab.y, ob.y, "y"), (ab.w, ob.w, "w"), (ab.h, ob.h, "h")] {
                 assertClose(x, y, 1.5, "\(a.kind) \(w)")
