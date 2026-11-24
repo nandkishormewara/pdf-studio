@@ -149,3 +149,23 @@ fun textOrigin(lay: Box, rotation: Int?, size: Double, lines: Int): Pt {
     fun room(span: Double, used: Double) = min(4.0, max(0.0, (span - used) / 2))
     return Pt(lay.x + room(lay.w, size * 0.6), lay.y + room(lay.h, size * 1.15 * lines))
 }
+
+enum class FormFieldKind { TEXT, CHECKBOX, RADIO, DROPDOWN, LIST }
+
+/**
+ * One fillable form field. [value] is the text, "true"/"false" for a checkbox, or the chosen option's export value
+ * ([options]; [optionLabels] are what the form shows). Fill with `PdfStudio.fillForm(source, mapOf(name to value), output)`.
+ */
+data class FormField(
+    val name: String,
+    val kind: FormFieldKind,
+    val value: String,
+    val options: List<String> = emptyList(),
+    val optionLabels: List<String> = options,
+    val readOnly: Boolean = false,
+    val required: Boolean = false,
+    /** first page the field appears on (0-based) */
+    val page: Int = 0,
+    val multiline: Boolean = false,
+    val maxLength: Int? = null,
+)

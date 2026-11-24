@@ -2,6 +2,14 @@
 
 All notable changes are listed here. The project follows [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Android
+- Viewer tools: oval, line, arrow, text box and sticky note next to pen, highlighter and box, with a colour row.
+- Tap a mark to see its author and date, comment on it, set its review status or delete it; Undo covers every change.
+- Forms: `PdfStudio.readFormFields` / `PdfStudio.fillForm` (text, checkbox, radio, dropdown, list) and a Form sheet in
+  the viewer whose values show on the page right away and are kept on save.
+
 ## 1.0.0 (2026-11-24)
 
 First public release.

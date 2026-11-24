@@ -12,7 +12,7 @@ import java.io.Serializable
  */
 data class ViewerConfig(
     val title: String? = null,
-    /** false enables pen / highlighter / rectangle tools and a Save action. */
+    /** false enables the markup tools (pen, highlighter, shapes, arrows, text, notes), comments and a Save action. */
     val readOnly: Boolean = true,
     val showPageIndicator: Boolean = true,
     /** XFDF layers drawn on top of the document (e.g. reviewer markup) without modifying the file. */
@@ -34,6 +34,8 @@ data class ViewerConfig(
     val thumbnailsEnabled: Boolean = true,
     /** With `readOnly = false`: long-press-drag selects text to highlight, underline or strike out. */
     val textMarkupEnabled: Boolean = true,
+    /** With `readOnly = false`: a Form button to fill the file's form fields (shown only when it has some). */
+    val formsEnabled: Boolean = true,
 ) : Serializable
 
 object PdfStudioViewer {

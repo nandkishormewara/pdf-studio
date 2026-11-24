@@ -305,6 +305,11 @@ Apps that embed PDF Studio's Android SDK use its viewer.
 
 - **Search** in the top bar: type, then ‹ › to step through results; the count shows how many.
 - **Pages** opens thumbnails; tap one to jump.
-- Where editing is allowed: long-press and drag over text to highlight, underline or strike it out; pen, highlighter
-  pen and box tools draw on the page.
+- Where editing is allowed: long-press and drag over text to highlight, underline or strike it out. The toolbar has
+  pen, highlighter, box, oval, line and arrow (drag on the page), text and note (tap where it goes, then type), and a
+  colour row. **Undo** steps back over any change; **Save** keeps a copy.
+- **Select**, then tap a mark to see who made it and when, add a comment, set its status (accepted, rejected,
+  completed) or delete it.
+- **Form** (shown when the file has form fields): fill text boxes, tick boxes and pick options, then **Apply**; the
+  values appear on the page and are saved with the copy.
 - Scanned pages can't be searched on Android; make them searchable on the web first (*Tools ▸ Recognise text*).

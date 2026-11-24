@@ -52,12 +52,12 @@ All parts use the same annotation data (JSON and XFDF) and the same coordinate s
 | Search (case, whole word, regex, phrases across lines) | ✅ | ✅ | ✅ | Android: case-insensitive whole-document search |
 | Highlight / underline / strikeout | ✅ | ✅ | ✅ | Android: long-press-drag selection |
 | Squiggly, cloud, polygon / polyline (from Apryse XFDF) | ◐ | ◐ | ◐ | Imported and shown; the React viewer package also draws them |
-| Text box, sticky note, freehand, rectangle, ellipse, line, arrow | ✅ | ✅ | ◐ | Android: pen, highlighter pen, boxes |
+| Text box, sticky note, freehand, rectangle, ellipse, line, arrow | ✅ | ✅ | ✅ | Android: tap a mark to comment on it or delete it; undo covers every change |
 | Rich text in text boxes (bold, italic, underline, colour) | ✅ | ◐ | ◐ | Mobile shows the plain text; styling is kept in the file |
 | Stamps (incl. Hindi स्वीकृत), signature picture | ✅ | ✅ | ◐ | |
-| Comments, review status, author | ✅ | ✅ | — | |
+| Comments, review status, author | ✅ | ✅ | ✅ | |
 | Measurement: distance, perimeter, area, scale, calibration | ✅ | ◐ | — | iOS shows and keeps them; created only on the web |
-| Forms: fill, JSON in / out, reset, flatten | ✅ | ◐ | — | iOS: PDFKit form filling |
+| Forms: fill, JSON in / out, reset, flatten | ✅ | ◐ | ◐ | iOS: PDFKit form filling. Android: fill text, checkbox, radio and choice fields (viewer Form sheet or `PdfStudio.fillForm`), flatten from the API |
 | Pages: rotate, delete, reorder, insert, merge, extract | ✅ | — | — | |
 | Save editable (Acrobat-compatible) / flattened | ✅ | ✅ | ✅ | |
 | XFDF import / export (Apryse dialect incl. add / modify / delete) | ✅ | ✅ | ✅ | |

@@ -101,6 +101,15 @@ import com.pdfstudio.sdk.pdf.TextExtractor
 import kotlinx.coroutines.delay
 import java.io.File
 import java.util.concurrent.Executors
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.graphics.PathEffect
+import com.pdfstudio.sdk.FormField
+import com.pdfstudio.sdk.FormFieldKind
+import com.pdfstudio.sdk.ReviewStatus
 
 /** Full-screen document viewer — the PDF Studio counterpart of PDFTron's `DocumentActivity`. */
 class PdfStudioViewerActivity : ComponentActivity() {
@@ -125,7 +134,7 @@ class PdfStudioViewerActivity : ComponentActivity() {
                     }
                 }
                 ViewerScreen(state, config, onBack = { finish() }, onRetry = { recreate() }, openRenderer = ::openRenderer,
-                    render = ::render, onSave = { doc, anns -> save(doc, anns) })
+                    render = ::render, onSave = { file, anns -> save(file, anns) }, workDir = File(cacheDir, "pdfstudio"))
             }
         }
     }
@@ -157,9 +166,10 @@ class PdfStudioViewerActivity : ComponentActivity() {
         }
     }
 
-    private suspend fun save(doc: LoadedDocument, annotations: List<Annotation>) = withContext(Dispatchers.IO) {
-        val out = File(cacheDir, "pdfstudio/annotated-${System.currentTimeMillis()}.pdf")
-        PdfStudio.writeAnnotations(doc.file, annotations, out)
+    /** Writes [annotations] onto [base] (the loaded file, or its form-filled copy). */
+    private suspend fun save(base: File, annotations: List<Annotation>) = withContext(Dispatchers.IO) {
+        val out = File(cacheDir, "pdfstudio/annotated-${System.currentTimeMillis()}.pdf").also { it.parentFile?.mkdirs() }
+        PdfStudio.writeAnnotations(base, annotations, out)
         setResult(Activity.RESULT_OK, Intent().putExtra(PdfStudioViewer.RESULT_SAVED_URI, Uri.fromFile(out)))
     }
 
@@ -175,9 +185,8 @@ internal sealed interface LoadState {
     data class Failed(val message: String) : LoadState
 }
 
-private enum class Tool(val label: String) { VIEW("View"), PEN("Pen"), HIGHLIGHTER("Highlighter"), RECT("Box") }
 
-/** Search / thumbnails / text state shared by the top bar and the page list. */
+/** Search / thumbnails / text / form state shared by the top bar and the page list. */
 private class ViewerUi {
     /** null while the background text index is being built. */
     var pageText by mutableStateOf<List<PageText>?>(null)
@@ -188,6 +197,11 @@ private class ViewerUi {
     /** Bumped to make the page list scroll to `hits[current]`. */
     var jump by mutableStateOf(0)
     var thumbsOpen by mutableStateOf(false)
+    /** The file's form fields; empty when it has none (or forms are off). */
+    var formFields by mutableStateOf<List<FormField>>(emptyList())
+    var formOpen by mutableStateOf(false)
+    /** The form-filled copy shown and saved instead of the loaded file, once a form is filled. */
+    var filled by mutableStateOf<File?>(null)
 
     fun step(d: Int) {
         if (hits.isEmpty()) return
@@ -198,17 +212,25 @@ private class ViewerUi {
 /** A text selection on one page: characters `start until end`, grown from the long-pressed word. */
 private data class TextSel(val page: Int, val anchorStart: Int, val anchorEnd: Int, val start: Int, val end: Int)
 
+/** Waiting for the text of a text box or note tapped onto [page] at [at]. */
+private data class TextPrompt(val tool: Tool, val page: Int, val at: Pt)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ViewerScreen(
     state: LoadState, config: ViewerConfig, onBack: () -> Unit, onRetry: () -> Unit,
-    openRenderer: suspend (File) -> Int, render: suspend (Int, Int) -> Bitmap?, onSave: suspend (LoadedDocument, List<Annotation>) -> Unit,
+    openRenderer: suspend (File) -> Int, render: suspend (Int, Int) -> Bitmap?, onSave: suspend (File, List<Annotation>) -> Unit,
+    workDir: File,
 ) {
     val ui = remember { ViewerUi() }
     val doc = (state as? LoadState.Ready)?.doc
     val wantsText = config.searchEnabled || (!config.readOnly && config.textMarkupEnabled)
     LaunchedEffect(doc) {
         if (doc != null && wantsText) ui.pageText = withContext(Dispatchers.IO) { runCatching { TextExtractor.extract(doc.file) }.getOrDefault(emptyList()) }
+    }
+    LaunchedEffect(doc) {
+        if (doc != null && !config.readOnly && config.formsEnabled)
+            ui.formFields = withContext(Dispatchers.IO) { runCatching { PdfStudio.readFormFields(doc.file) }.getOrDefault(emptyList()) }
     }
     LaunchedEffect(ui.query, ui.pageText) {
         val pages = ui.pageText ?: return@LaunchedEffect
@@ -223,6 +245,7 @@ private fun ViewerScreen(
             title = { Text(config.title ?: "Document", maxLines = 1) },
             navigationIcon = { TextButton(onClick = onBack) { Text("‹ Back") } },
             actions = {
+                if (doc != null && ui.formFields.any { !it.readOnly }) TextButton(onClick = { ui.formOpen = true }) { Text("Form", maxLines = 1) }
                 if (doc != null && config.searchEnabled) TextButton(onClick = { ui.searchOpen = true }) { Text("Search", maxLines = 1) }
                 if (doc != null && config.thumbnailsEnabled) TextButton(onClick = { ui.thumbsOpen = true }) { Text("Pages", maxLines = 1) }
             },
@@ -238,8 +261,343 @@ private fun ViewerScreen(
                     Text(state.message, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(8.dp))
                     Button(onClick = onRetry) { Text("Retry") }
                 }
-                is LoadState.Ready -> DocumentPages(state.doc, config, ui, openRenderer, render, onSave)
+                is LoadState.Ready -> DocumentPages(state.doc, config, ui, openRenderer, render, onSave, workDir)
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DocumentPages(
+    doc: LoadedDocument, config: ViewerConfig, ui: ViewerUi, openRenderer: suspend (File) -> Int,
+    render: suspend (Int, Int) -> Bitmap?, onSave: suspend (File, List<Annotation>) -> Unit, workDir: File,
+) {
+    val file = ui.filled ?: doc.file
+    val pageCount by produceState(0, doc, file) { value = openRenderer(file) }
+    val annotations = remember(doc) { mutableStateListOf<Annotation>().apply { addAll(doc.annotations) } }
+    val history = remember(doc) { EditHistory() }
+    var undoCount by remember { mutableStateOf(0) }
+    var tool by remember { mutableStateOf(Tool.VIEW) }
+    var color by remember { mutableStateOf(MARK_COLORS.first()) }
+    var saved by remember { mutableStateOf(false) }
+    var zoom by remember { mutableStateOf(1f) }
+    var pan by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var widthPx by remember { mutableStateOf(0) }
+    var heightPx by remember { mutableStateOf(0) }
+    var selection by remember { mutableStateOf<TextSel?>(null) }
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    var prompt by remember { mutableStateOf<TextPrompt?>(null) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val painter = remember { AnnotationPainter() }
+    val density = LocalDensity.current
+    val clipboard = LocalClipboardManager.current
+    val hitsByPage = remember(ui.hits) { ui.hits.withIndex().groupBy { it.value.page } }
+    val canSelect = !config.readOnly && config.textMarkupEnabled
+    val transform = rememberTransformableState { z, p, _ ->
+        zoom = (zoom * z).coerceIn(1f, 5f)
+        pan = if (zoom == 1f) androidx.compose.ui.geometry.Offset.Zero else pan + p
+    }
+
+    /** Every edit goes through here, so Undo can step back over it. */
+    fun change(edit: MutableList<Annotation>.() -> Unit) {
+        history.record(annotations.toList()); undoCount++
+        annotations.edit(); saved = false
+    }
+
+    // Scroll so the current search hit sits in the upper third of the viewport.
+    LaunchedEffect(ui.jump, pageCount) {
+        val hit = ui.hits.getOrNull(ui.current) ?: return@LaunchedEffect
+        if (hit.page >= pageCount) return@LaunchedEffect
+        zoom = 1f; pan = androidx.compose.ui.geometry.Offset.Zero
+        val pagePx = widthPx - with(density) { 24.dp.toPx() }
+        val y = hit.rects.first().y * pagePx / doc.geometries[hit.page].width
+        listState.animateScrollToItem(hit.page, (y - heightPx / 3.0).toInt().coerceAtLeast(0))
+    }
+
+    Box(Modifier.fillMaxSize().onSizeChanged { widthPx = it.width; heightPx = it.height }) {
+        LazyColumn(
+            state = listState,
+            userScrollEnabled = !tool.drag,
+            contentPadding = PaddingValues(start = 12.dp, top = 12.dp, end = 12.dp, bottom = if (config.readOnly) 12.dp else 120.dp),
+            modifier = Modifier.fillMaxSize()
+                .then(if (tool == Tool.VIEW) Modifier.transformable(transform) else Modifier)
+                .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y },
+        ) {
+            items(pageCount) { index ->
+                val g = doc.geometries[index]
+                val text = ui.pageText?.getOrNull(index)
+                val bitmap by produceState<Bitmap?>(null, index, widthPx, pageCount, file) {
+                    if (widthPx > 0 && pageCount > 0) value = render(index, (widthPx * 1.5f).toInt())
+                }
+                var current by remember { mutableStateOf<List<Pt>>(emptyList()) }
+                fun toPage(o: androidx.compose.ui.geometry.Offset, w: Int) = Pt(o.x * g.width / w, o.y * g.width / w)
+                val gestures = when {
+                    tool.drag && !config.readOnly -> Modifier.pointerInput(tool, color, index) {
+                        detectDragGestures(
+                            onDragStart = { o -> current = listOf(toPage(o, size.width)) },
+                            onDrag = { ch, _ -> current = current + toPage(ch.position, size.width) },
+                            onDragEnd = {
+                                Editing.shape(tool, index, current, color, config.author)?.let { a -> change { add(a) } }
+                                current = emptyList()
+                            },
+                            onDragCancel = { current = emptyList() },
+                        )
+                    }
+                    tool.asksForText && !config.readOnly -> Modifier.pointerInput(tool, index) {
+                        detectTapGestures(onTap = { o -> prompt = TextPrompt(tool, index, toPage(o, size.width)) })
+                    }
+                    else -> Modifier
+                        // tap a mark to see its details (read-only viewers can read comments too)
+                        .pointerInput(index) {
+                            detectTapGestures(onTap = { o ->
+                                selectedId = Editing.hit(annotations, index, toPage(o, size.width), slop = 8.0 * g.width / size.width * density.density)?.id
+                                selection = null
+                            })
+                        }
+                        .then(if (canSelect && text != null) Modifier.pointerInput(text) {
+                            fun at(o: androidx.compose.ui.geometry.Offset) = text.charAt(toPage(o, size.width))
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { o ->
+                                    val i = at(o)
+                                    selection = if (i < 0) null else wordAround(text.text, i).let { (s, e) -> TextSel(index, s, e, s, e) }
+                                },
+                                onDrag = { ch, _ ->
+                                    val sel = selection?.takeIf { it.page == index } ?: return@detectDragGesturesAfterLongPress
+                                    ch.consume()
+                                    val i = at(ch.position)
+                                    if (i >= 0) selection = if (i < sel.anchorStart) sel.copy(start = i, end = sel.anchorEnd)
+                                        else sel.copy(start = sel.anchorStart, end = maxOf(sel.anchorEnd, i + 1))
+                                },
+                            )
+                        } else Modifier)
+                }
+                Box(Modifier.fillMaxWidth().padding(bottom = 12.dp).aspectRatio((g.width / g.height).toFloat()).background(Color.White)) {
+                    Canvas(Modifier.fillMaxSize().then(gestures)) {
+                        val scale = size.width / g.width.toFloat()
+                        // The page is drawn on the same canvas as the marks, so highlights can multiply with the text under them.
+                        bitmap?.let { drawImage(it.asImageBitmap(), dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt())) }
+                        fun rect(b: com.pdfstudio.sdk.Box) = Pair(
+                            androidx.compose.ui.geometry.Offset((b.x * scale).toFloat(), (b.y * scale).toFloat()),
+                            androidx.compose.ui.geometry.Size((b.w * scale).toFloat(), (b.h * scale).toFloat()),
+                        )
+                        val canvas = drawContext.canvas.nativeCanvas
+                        annotations.filter { it.page == index }.forEach { painter.draw(canvas, it, scale) }
+                        if (current.size > 1) Editing.shape(tool, index, current, color, config.author)?.let { painter.draw(canvas, it, scale) }
+                        annotations.firstOrNull { it.id == selectedId && it.page == index }?.let { sel ->
+                            val (o, s) = rect(sel.bounds.inset(-4.0))
+                            drawRect(Color(0xFF1F6FEB), o, s, style = Stroke(1.5f * density.density, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f * density.density, 4f * density.density))))
+                        }
+                        hitsByPage[index]?.forEach { (i, hit) ->
+                            hit.rects.forEach { b ->
+                                val (o, s) = rect(b.inset(-1.0))
+                                drawRect(if (i == ui.current) Color(0x88FF8A00) else Color(0x44FFB300), o, s)
+                                if (i == ui.current) drawRect(Color(0xFFE56A00), o, s, style = Stroke(1.5f * density.density))
+                            }
+                        }
+                        selection?.takeIf { it.page == index && text != null }?.let { sel ->
+                            text!!.lineRects(sel.start, sel.end).forEach { b -> val (o, s) = rect(b); drawRect(Color(0x553B82F6), o, s) }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (config.showPageIndicator && pageCount > 0) {
+            val page by remember { derivedStateOf { listState.firstVisibleItemIndex + 1 } }
+            Surface(Modifier.align(Alignment.BottomCenter).padding(bottom = if (config.readOnly) 16.dp else 124.dp), shape = RoundedCornerShape(50), tonalElevation = 3.dp, shadowElevation = 3.dp) {
+                Text("$page / $pageCount", Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
+            }
+        }
+
+        selection?.let { sel ->
+            val text = ui.pageText?.getOrNull(sel.page)
+            Surface(Modifier.align(Alignment.TopCenter).padding(8.dp), shape = RoundedCornerShape(50), tonalElevation = 3.dp, shadowElevation = 6.dp) {
+                Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    for (kind in listOf(AnnotationKind.HIGHLIGHT, AnnotationKind.UNDERLINE, AnnotationKind.STRIKEOUT)) {
+                        TextButton(onClick = {
+                            text?.let { textMarkup(kind, sel.page, it.lineRects(sel.start, sel.end), config.author, color) }?.let { a -> change { add(a) } }
+                            selection = null
+                        }) { Text(kind.name.lowercase().replaceFirstChar { it.uppercase() }.replace("Strikeout", "Strike"), maxLines = 1) }
+                    }
+                    if (!config.secure && text != null) TextButton(onClick = {
+                        clipboard.setText(AnnotatedString(text.text.substring(sel.start, sel.end))); selection = null
+                    }) { Text("Copy", maxLines = 1) }
+                    TextButton(onClick = { selection = null }) { Text("✕") }
+                }
+            }
+        }
+
+        if (!config.readOnly) {
+            Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), tonalElevation = 3.dp, shadowElevation = 6.dp) {
+                Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                        Tool.entries.forEach { t ->
+                            FilterChip(selected = tool == t, onClick = { tool = t; selectedId = null }, label = { Text(t.label, maxLines = 1) }, modifier = Modifier.padding(horizontal = 3.dp))
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                            MARK_COLORS.forEach { c ->
+                                val on = c == color
+                                Box(Modifier.padding(horizontal = 4.dp).size(if (on) 30.dp else 26.dp).clip(CircleShape)
+                                    .background(Color(android.graphics.Color.parseColor(c)))
+                                    .border(if (on) 3.dp else 1.dp, if (on) MaterialTheme.colorScheme.primary else Color(0x33000000), CircleShape)
+                                    .clickable { color = c })
+                            }
+                        }
+                        TextButton(enabled = undoCount > 0 && history.canUndo, onClick = {
+                            history.undo()?.let { before -> annotations.clear(); annotations.addAll(before); undoCount--; saved = false; selectedId = null }
+                        }) { Text("Undo", maxLines = 1) }
+                        Button(onClick = { scope.launch { onSave(file, annotations.toList()); saved = true } }) { Text(if (saved) "Saved" else "Save", maxLines = 1) }
+                    }
+                }
+            }
+        }
+
+        annotations.firstOrNull { it.id == selectedId }?.let { a ->
+            ModalBottomSheet(onDismissRequest = { selectedId = null }) {
+                MarkDetails(a, editable = !config.readOnly,
+                    onDone = { comment, status ->
+                        val updated = Editing.annotate(a, comment, status)
+                        if (updated !== a) change { set(indexOfFirst { it.id == a.id }, updated) }
+                        selectedId = null
+                    },
+                    onDelete = { change { removeAll { it.id == a.id } }; selectedId = null })
+            }
+        }
+
+        prompt?.let { p ->
+            TextPromptDialog(p.tool, onDismiss = { prompt = null }) { value ->
+                val g = doc.geometries[p.page]
+                val a = if (p.tool == Tool.NOTE) Editing.note(p.page, p.at, value, config.author, g.width, g.height)
+                    else Editing.textBox(p.page, p.at, value, color, config.author, g.width, g.height)
+                a?.let { change { add(it) } }
+                prompt = null
+            }
+        }
+
+        if (ui.formOpen) {
+            ModalBottomSheet(onDismissRequest = { ui.formOpen = false }) {
+                FormSheet(ui.formFields, onCancel = { ui.formOpen = false }) { values ->
+                    scope.launch {
+                        val out = File(workDir, "filled-${System.currentTimeMillis()}.pdf").also { it.parentFile?.mkdirs() }
+                        val fields = withContext(Dispatchers.IO) {
+                            PdfStudio.fillForm(file, values, out)
+                            PdfStudio.readFormFields(out)
+                        }
+                        ui.filled = out; ui.formFields = fields; saved = false
+                        ui.formOpen = false
+                    }
+                }
+            }
+        }
+
+        if (ui.thumbsOpen && pageCount > 0) {
+            ModalBottomSheet(onDismissRequest = { ui.thumbsOpen = false }) {
+                Thumbnails(doc, file, pageCount, listState.firstVisibleItemIndex, render) { page ->
+                    ui.thumbsOpen = false
+                    scope.launch { zoom = 1f; pan = androidx.compose.ui.geometry.Offset.Zero; listState.scrollToItem(page) }
+                }
+            }
+        }
+        LaunchedEffect(tool) { if (tool != Tool.VIEW) { zoom = 1f; pan = androidx.compose.ui.geometry.Offset.Zero; selection = null } }
+    }
+}
+
+/** A mark's author, date, comment and review status; Delete and Done when the viewer is editable. */
+@Composable
+private fun MarkDetails(a: Annotation, editable: Boolean, onDone: (String?, ReviewStatus) -> Unit, onDelete: () -> Unit) {
+    var comment by remember(a.id) { mutableStateOf(a.comment.orEmpty()) }
+    var status by remember(a.id) { mutableStateOf(a.status) }
+    val date = remember(a.modifiedAt) {
+        Annotation.parseIso(a.modifiedAt)?.let { java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(it) }.orEmpty()
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+        Text(Editing.title(a), style = MaterialTheme.typography.titleLarge)
+        Text(listOf(a.author, date).filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (a.kind == AnnotationKind.FREETEXT && !a.text.isNullOrBlank())
+            Text(a.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 12.dp))
+        Spacer(Modifier.size(12.dp))
+        if (editable) {
+            OutlinedTextField(value = comment, onValueChange = { comment = it }, label = { Text("Comment") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+            Text("Status", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                ReviewStatus.entries.forEach { s ->
+                    FilterChip(selected = status == s, onClick = { status = s },
+                        label = { Text(if (s == ReviewStatus.NONE) "None" else s.json.replaceFirstChar { it.uppercase() }) }, modifier = Modifier.padding(end = 6.dp))
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                Spacer(Modifier.weight(1f))
+                Button(onClick = { onDone(comment, status) }) { Text("Done") }
+            }
+        } else {
+            Text(a.comment?.takeIf { it.isNotBlank() } ?: "No comment", style = MaterialTheme.typography.bodyLarge)
+            if (a.status != ReviewStatus.NONE) Text("Status: ${a.status.json}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
+        }
+    }
+}
+
+@Composable
+private fun TextPromptDialog(tool: Tool, onDismiss: () -> Unit, onDone: (String) -> Unit) {
+    var value by remember { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (tool == Tool.NOTE) "Note" else "Text") },
+        text = {
+            OutlinedTextField(value = value, onValueChange = { value = it }, minLines = 2,
+                placeholder = { Text(if (tool == Tool.NOTE) "Comment" else "Text on the page") },
+                modifier = Modifier.fillMaxWidth().focusRequester(focus))
+        },
+        confirmButton = { Button(enabled = value.isNotBlank(), onClick = { onDone(value) }) { Text("Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Every fillable field with an editor for its kind; Apply fills them all at once. */
+@Composable
+private fun FormSheet(fields: List<FormField>, onCancel: () -> Unit, onApply: (Map<String, String>) -> Unit) {
+    val values = remember(fields) { mutableStateMapOf<String, String>().apply { fields.forEach { put(it.name, it.value) } } }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+        Text("Form", style = MaterialTheme.typography.titleLarge)
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp).padding(vertical = 8.dp)) {
+            items(fields.size) { i ->
+                val f = fields[i]
+                val label = f.name.substringAfterLast('.') + if (f.required) " *" else ""
+                Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                    when (f.kind) {
+                        FormFieldKind.TEXT -> OutlinedTextField(
+                            value = values[f.name].orEmpty(), enabled = !f.readOnly, label = { Text(label) },
+                            onValueChange = { v -> values[f.name] = f.maxLength?.let { v.take(it) } ?: v },
+                            singleLine = !f.multiline, modifier = Modifier.fillMaxWidth(),
+                        )
+                        FormFieldKind.CHECKBOX -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = values[f.name] == "true", enabled = !f.readOnly, onCheckedChange = { values[f.name] = it.toString() })
+                            Text(label)
+                        }
+                        FormFieldKind.RADIO, FormFieldKind.DROPDOWN, FormFieldKind.LIST -> {
+                            Text(label, style = MaterialTheme.typography.labelLarge)
+                            Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp)) {
+                                f.options.forEachIndexed { j, opt ->
+                                    FilterChip(selected = values[f.name] == opt, enabled = !f.readOnly,
+                                        onClick = { values[f.name] = if (values[f.name] == opt && f.kind != FormFieldKind.DROPDOWN) "" else opt },
+                                        label = { Text(f.optionLabels.getOrElse(j) { opt }) }, modifier = Modifier.padding(end = 6.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onCancel) { Text("Cancel") }
+            Button(onClick = { onApply(fields.filter { !it.readOnly && values[it.name] != it.value }.associate { it.name to values[it.name].orEmpty() }) }) { Text("Apply") }
         }
     }
 }
@@ -278,169 +636,10 @@ private fun SearchBar(ui: ViewerUi) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DocumentPages(
-    doc: LoadedDocument, config: ViewerConfig, ui: ViewerUi, openRenderer: suspend (File) -> Int,
-    render: suspend (Int, Int) -> Bitmap?, onSave: suspend (LoadedDocument, List<Annotation>) -> Unit,
-) {
-    val pageCount by produceState(0, doc) { value = openRenderer(doc.file) }
-    val annotations = remember(doc) { mutableStateListOf<Annotation>().apply { addAll(doc.annotations) } }
-    var tool by remember { mutableStateOf(Tool.VIEW) }
-    var saved by remember { mutableStateOf(false) }
-    var zoom by remember { mutableStateOf(1f) }
-    var pan by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    var widthPx by remember { mutableStateOf(0) }
-    var heightPx by remember { mutableStateOf(0) }
-    var selection by remember { mutableStateOf<TextSel?>(null) }
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    val painter = remember { AnnotationPainter() }
-    val density = LocalDensity.current
-    val clipboard = LocalClipboardManager.current
-    val hitsByPage = remember(ui.hits) { ui.hits.withIndex().groupBy { it.value.page } }
-    val canSelect = !config.readOnly && config.textMarkupEnabled
-    val transform = rememberTransformableState { z, p, _ ->
-        zoom = (zoom * z).coerceIn(1f, 5f)
-        pan = if (zoom == 1f) androidx.compose.ui.geometry.Offset.Zero else pan + p
-    }
-
-    // Scroll so the current search hit sits in the upper third of the viewport.
-    LaunchedEffect(ui.jump, pageCount) {
-        val hit = ui.hits.getOrNull(ui.current) ?: return@LaunchedEffect
-        if (hit.page >= pageCount) return@LaunchedEffect
-        zoom = 1f; pan = androidx.compose.ui.geometry.Offset.Zero
-        val pagePx = widthPx - with(density) { 24.dp.toPx() }
-        val y = hit.rects.first().y * pagePx / doc.geometries[hit.page].width
-        listState.animateScrollToItem(hit.page, (y - heightPx / 3.0).toInt().coerceAtLeast(0))
-    }
-
-    Box(Modifier.fillMaxSize().onSizeChanged { widthPx = it.width; heightPx = it.height }) {
-        LazyColumn(
-            state = listState,
-            userScrollEnabled = tool == Tool.VIEW,
-            contentPadding = PaddingValues(12.dp),
-            modifier = Modifier.fillMaxSize()
-                .then(if (tool == Tool.VIEW) Modifier.transformable(transform) else Modifier)
-                .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y },
-        ) {
-            items(pageCount) { index ->
-                val g = doc.geometries[index]
-                val text = ui.pageText?.getOrNull(index)
-                val bitmap by produceState<Bitmap?>(null, index, widthPx, pageCount) {
-                    if (widthPx > 0 && pageCount > 0) value = render(index, (widthPx * 1.5f).toInt())
-                }
-                var current by remember { mutableStateOf<List<Pt>>(emptyList()) }
-                val gestures = when {
-                    tool != Tool.VIEW && !config.readOnly -> Modifier.pointerInput(tool, index) {
-                        val scale = { size.width / g.width.toFloat() }
-                        detectDragGestures(
-                            onDragStart = { o -> current = listOf(Pt(o.x / scale().toDouble(), o.y / scale().toDouble())) },
-                            onDrag = { ch, _ -> current = current + Pt(ch.position.x / scale().toDouble(), ch.position.y / scale().toDouble()) },
-                            onDragEnd = {
-                                makeAnnotation(tool, index, current, config.author)?.let { annotations += it; saved = false }
-                                current = emptyList()
-                            },
-                        )
-                    }
-                    tool == Tool.VIEW && canSelect && text != null -> Modifier.pointerInput(text) {
-                        fun at(o: androidx.compose.ui.geometry.Offset) = text.charAt(Pt(o.x * g.width / size.width, o.y * g.width / size.width))
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { o ->
-                                val i = at(o)
-                                selection = if (i < 0) null else wordAround(text.text, i).let { (s, e) -> TextSel(index, s, e, s, e) }
-                            },
-                            onDrag = { ch, _ ->
-                                val sel = selection?.takeIf { it.page == index } ?: return@detectDragGesturesAfterLongPress
-                                ch.consume()
-                                val i = at(ch.position)
-                                if (i >= 0) selection = if (i < sel.anchorStart) sel.copy(start = i, end = sel.anchorEnd)
-                                    else sel.copy(start = sel.anchorStart, end = maxOf(sel.anchorEnd, i + 1))
-                            },
-                        )
-                    }
-                    else -> Modifier
-                }
-                Box(Modifier.fillMaxWidth().padding(bottom = 12.dp).aspectRatio((g.width / g.height).toFloat()).background(Color.White)) {
-                    Canvas(Modifier.fillMaxSize().then(gestures)) {
-                        val scale = size.width / g.width.toFloat()
-                        // The page is drawn on the same canvas as the marks, so highlights can multiply with the text under them.
-                        bitmap?.let { drawImage(it.asImageBitmap(), dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt())) }
-                        fun rect(b: com.pdfstudio.sdk.Box) = Pair(
-                            androidx.compose.ui.geometry.Offset((b.x * scale).toFloat(), (b.y * scale).toFloat()),
-                            androidx.compose.ui.geometry.Size((b.w * scale).toFloat(), (b.h * scale).toFloat()),
-                        )
-                        val canvas = drawContext.canvas.nativeCanvas
-                        annotations.filter { it.page == index }.forEach { painter.draw(canvas, it, scale) }
-                        if (current.size > 1) makeAnnotation(tool, index, current, config.author)?.let { painter.draw(canvas, it, scale) }
-                        hitsByPage[index]?.forEach { (i, hit) ->
-                            hit.rects.forEach { b ->
-                                val (o, s) = rect(b.inset(-1.0))
-                                drawRect(if (i == ui.current) Color(0x88FF8A00) else Color(0x44FFB300), o, s)
-                                if (i == ui.current) drawRect(Color(0xFFE56A00), o, s, style = Stroke(1.5f * density.density))
-                            }
-                        }
-                        selection?.takeIf { it.page == index && text != null }?.let { sel ->
-                            text!!.lineRects(sel.start, sel.end).forEach { b -> val (o, s) = rect(b); drawRect(Color(0x553B82F6), o, s) }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (config.showPageIndicator && pageCount > 0) {
-            val page by remember { derivedStateOf { listState.firstVisibleItemIndex + 1 } }
-            Surface(Modifier.align(Alignment.BottomCenter).padding(bottom = if (config.readOnly) 16.dp else 76.dp), shape = RoundedCornerShape(50), tonalElevation = 3.dp, shadowElevation = 3.dp) {
-                Text("$page / $pageCount", Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
-            }
-        }
-
-        selection?.let { sel ->
-            val text = ui.pageText?.getOrNull(sel.page)
-            Surface(Modifier.align(Alignment.TopCenter).padding(8.dp), shape = RoundedCornerShape(50), tonalElevation = 3.dp, shadowElevation = 6.dp) {
-                Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    for (kind in listOf(AnnotationKind.HIGHLIGHT, AnnotationKind.UNDERLINE, AnnotationKind.STRIKEOUT)) {
-                        TextButton(onClick = {
-                            text?.let { textMarkup(kind, sel.page, it.lineRects(sel.start, sel.end), config.author) }?.let { annotations += it; saved = false }
-                            selection = null
-                        }) { Text(kind.name.lowercase().replaceFirstChar { it.uppercase() }.replace("Strikeout", "Strike"), maxLines = 1) }
-                    }
-                    if (!config.secure && text != null) TextButton(onClick = {
-                        clipboard.setText(AnnotatedString(text.text.substring(sel.start, sel.end))); selection = null
-                    }) { Text("Copy", maxLines = 1) }
-                    TextButton(onClick = { selection = null }) { Text("✕") }
-                }
-            }
-        }
-
-        if (!config.readOnly) {
-            Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth(), tonalElevation = 3.dp, shadowElevation = 6.dp) {
-                Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-                        Tool.entries.forEach { t -> FilterChip(selected = tool == t, onClick = { tool = t }, label = { Text(t.label, maxLines = 1) }, modifier = Modifier.padding(horizontal = 3.dp)) }
-                    }
-                    TextButton(enabled = annotations.size > doc.annotations.size, onClick = { annotations.removeAt(annotations.lastIndex) }) { Text("Undo", maxLines = 1) }
-                    Button(onClick = { scope.launch { onSave(doc, annotations.toList()); saved = true } }) { Text(if (saved) "Saved" else "Save", maxLines = 1) }
-                }
-            }
-        }
-
-        if (ui.thumbsOpen && pageCount > 0) {
-            ModalBottomSheet(onDismissRequest = { ui.thumbsOpen = false }) {
-                Thumbnails(doc, pageCount, listState.firstVisibleItemIndex, render) { page ->
-                    ui.thumbsOpen = false
-                    scope.launch { zoom = 1f; pan = androidx.compose.ui.geometry.Offset.Zero; listState.scrollToItem(page) }
-                }
-            }
-        }
-        LaunchedEffect(tool) { if (tool != Tool.VIEW) { zoom = 1f; pan = androidx.compose.ui.geometry.Offset.Zero; selection = null } }
-    }
-}
-
 /** Page thumbnails; bitmaps are rendered once per document and kept in a small LRU cache. */
 @Composable
-private fun Thumbnails(doc: LoadedDocument, pageCount: Int, currentPage: Int, render: suspend (Int, Int) -> Bitmap?, onPick: (Int) -> Unit) {
-    val cache = remember(doc) { LruCache<Int, Bitmap>(48) }
+private fun Thumbnails(doc: LoadedDocument, file: File, pageCount: Int, currentPage: Int, render: suspend (Int, Int) -> Bitmap?, onPick: (Int) -> Unit) {
+    val cache = remember(doc, file) { LruCache<Int, Bitmap>(48) }
     val widthPx = with(LocalDensity.current) { 104.dp.roundToPx() }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(104.dp), state = rememberLazyGridState(initialFirstVisibleItemIndex = currentPage),
@@ -448,7 +647,7 @@ private fun Thumbnails(doc: LoadedDocument, pageCount: Int, currentPage: Int, re
     ) {
         items(pageCount) { index ->
             val g = doc.geometries[index]
-            val bitmap by produceState(cache.get(index), index) {
+            val bitmap by produceState(cache.get(index), index, file) {
                 if (value == null) value = render(index, widthPx)?.also { cache.put(index, it) }
             }
             Column(Modifier.padding(6.dp).clickable { onPick(index) }, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -471,18 +670,9 @@ private fun wordAround(s: String, i: Int): Pair<Int, Int> {
     return a to b
 }
 
-private fun textMarkup(kind: AnnotationKind, page: Int, rects: List<com.pdfstudio.sdk.Box>, author: String): Annotation? {
+private fun textMarkup(kind: AnnotationKind, page: Int, rects: List<com.pdfstudio.sdk.Box>, author: String, color: String): Annotation? {
     if (rects.isEmpty()) return null
     return if (kind == AnnotationKind.HIGHLIGHT) Annotation(page = page, kind = kind, color = "#ffd84d", opacity = 0.45, strokeWidth = 0.0, rects = rects, author = author)
-    else Annotation(page = page, kind = kind, color = "#e5484d", strokeWidth = 1.5, rects = rects, author = author)
+    else Annotation(page = page, kind = kind, color = color, strokeWidth = 1.5, rects = rects, author = author)
 }
 
-private fun makeAnnotation(tool: Tool, page: Int, pts: List<Pt>, author: String): Annotation? {
-    if (pts.size < 2) return null
-    return when (tool) {
-        Tool.PEN -> Annotation(page = page, kind = AnnotationKind.INK, color = "#e5484d", strokeWidth = 2.0, paths = listOf(pts), author = author)
-        Tool.HIGHLIGHTER -> Annotation(page = page, kind = AnnotationKind.INK, color = "#ffd84d", opacity = 0.45, strokeWidth = 12.0, paths = listOf(pts), author = author)
-        Tool.RECT -> Annotation(page = page, kind = AnnotationKind.RECT, color = "#e5484d", strokeWidth = 2.0, rect = Box.spanning(pts.first(), pts.last()), author = author)
-        Tool.VIEW -> null
-    }
-}

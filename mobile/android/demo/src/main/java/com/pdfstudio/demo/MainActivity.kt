@@ -42,7 +42,8 @@ class MainActivity : ComponentActivity() {
                         Text("Replacements for the PDFTron calls used by a typical app.", style = MaterialTheme.typography.bodyMedium)
                         Button(onClick = ::checkedCopy, modifier = Modifier.fillMaxWidth()) { Text("Reviewer-checked copy (XFDF, read-only)") }
                         Button(onClick = ::mergedFile, modifier = Modifier.fillMaxWidth()) { Text("mergeXfdf → file → viewer") }
-                        OutlinedButton(onClick = ::editable, modifier = Modifier.fillMaxWidth()) { Text("Editable (pen, highlighter, box, text markup)") }
+                        OutlinedButton(onClick = ::editable, modifier = Modifier.fillMaxWidth()) { Text("Annotate (shapes, arrows, text, notes, comments)") }
+                        OutlinedButton(onClick = ::form, modifier = Modifier.fillMaxWidth()) { Text("Fill a form") }
                         OutlinedButton(onClick = ::imagesToPdf, modifier = Modifier.fillMaxWidth()) { Text("Homework photos → PDF") }
                     }
                 }
@@ -83,6 +84,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun editable() = PdfStudioViewer.open(this, Uri.fromFile(samplePdf()), ViewerConfig(title = "Annotate", readOnly = false))
+
+    private fun form() = PdfStudioViewer.open(this, Uri.fromFile(FormSample.write(File(cacheDir, "form.pdf"))), ViewerConfig(title = "Sample form", readOnly = false))
 
     private fun imagesToPdf() {
         val photos = listOf(Color.rgb(30, 90, 200), Color.rgb(20, 140, 90)).mapIndexed { i, c ->

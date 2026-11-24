@@ -89,9 +89,16 @@ PdfStudio.search(pdf, "photosynthesis")                              // hits wit
 PdfStudio.extractText(pdf).map { it.lines() }                        // lines and words with boxes, font and size
 PdfStudio.extractPlainText(pdf)                                      // "===== Page n =====" headings, reading order, like web and server
 PdfStudio.extractTextJson(pdf)                                       // the web SDK's pdf-studio-text JSON
+PdfStudio.readFormFields(pdf)                                        // text, checkbox, radio, dropdown and list fields with values
+PdfStudio.fillForm(pdf, mapOf("name" to "Jane Doe", "agree" to "true"), outPdf)   // flatten = true to burn them in
 ```
 
-`ViewerConfig(searchEnabled = false, thumbnailsEnabled = false, textMarkupEnabled = false, readOnly = true)` turns features off. Office files need `ViewerConfig.conversionServer` (the PDF Studio server, see [server and deployment](server-and-deployment.md)).
+With `readOnly = false` the viewer offers select, pen, highlighter, box, oval, line, arrow, text and note tools with a
+colour row, Undo and Save. Tapping a mark opens its details: author, date, comment, review status and Delete (read-only
+viewers show the comment). A **Form** button appears when the file has fillable fields; filled values show on the pages
+at once and are kept in the saved copy. `ViewerConfig(formsEnabled = false)` hides it.
+
+`ViewerConfig(searchEnabled = false, thumbnailsEnabled = false, textMarkupEnabled = false, formsEnabled = false, readOnly = true)` turns features off. Office files need `ViewerConfig.conversionServer` (the PDF Studio server, see [server and deployment](server-and-deployment.md)).
 
 The library's consumer ProGuard rules (`consumer-rules.pro`) keep the PdfBox classes it loads by reflection. No extra rules are needed in the app.
 

@@ -254,6 +254,55 @@ class PdfStudioDeviceTest {
         PdfStudio.readAnnotations(foreign).forEach { a -> assertBox(rects.single(), a.rects!!.single(), 0.05) }
     }
 
+    @Test fun readsFormFieldsOfEveryKind() {
+        val fields = PdfStudio.readFormFields(FormSample.write(File(dir, "form.pdf"))).associateBy { it.name }
+        assertEquals(setOf("name", "course", "mode", "agree"), fields.keys)
+        assertEquals(FormFieldKind.TEXT, fields.getValue("name").kind)
+        assertEquals(FormFieldKind.DROPDOWN, fields.getValue("course").kind)
+        assertEquals(listOf("Science", "Commerce", "Arts"), fields.getValue("course").options)
+        assertEquals(FormFieldKind.RADIO, fields.getValue("mode").kind)
+        assertEquals(listOf("Classroom", "Online"), fields.getValue("mode").options)
+        assertEquals(FormFieldKind.CHECKBOX, fields.getValue("agree").kind)
+        assertEquals("false", fields.getValue("agree").value)
+        assertTrue(fields.values.all { it.page == 0 && !it.readOnly })
+    }
+
+    @Test fun fillsFormFieldsAndShowsTheValues() {
+        val src = FormSample.write(File(dir, "form-src.pdf"))
+        val out = File(dir, "form-filled.pdf")
+        val changed = PdfStudio.fillForm(src, mapOf("name" to "Jane Doe", "course" to "Commerce", "mode" to "Online", "agree" to "true", "nope" to "x"), out)
+        assertEquals(4, changed)
+        val back = PdfStudio.readFormFields(out).associate { it.name to it.value }
+        assertEquals(mapOf("name" to "Jane Doe", "course" to "Commerce", "mode" to "Online", "agree" to "true"), back)
+
+        // the typed name is drawn: PdfRenderer shows dark pixels inside the empty-before field
+        fun ink(f: File): Int {
+            val bmp = renderPage(f, 0); val r = FormSample.NAME_RECT; val k = bmp.width / 612f
+            var n = 0
+            for (y in ((792 - r.upperRightY) * k).toInt() until ((792 - r.lowerLeftY) * k).toInt())
+                for (x in (r.lowerLeftX * k).toInt() + 4 until (r.upperRightX * k).toInt() - 4)
+                    if (Color.red(bmp.getPixel(x, y)) < 100) n++
+            return n
+        }
+        assertTrue("filled name not drawn", ink(out) > ink(src) + 50)
+
+        // options a field doesn't have are refused; clearing works
+        assertEquals(0, PdfStudio.fillForm(out, mapOf("course" to "Painting", "mode" to "Distance"), File(dir, "form-bad.pdf")))
+        val cleared = File(dir, "form-cleared.pdf")
+        assertEquals(2, PdfStudio.fillForm(out, mapOf("agree" to "false", "name" to ""), cleared))
+        assertEquals("false", PdfStudio.readFormFields(cleared).first { it.name == "agree" }.value)
+    }
+
+    @Test fun filledFormKeepsItsFieldsWhenAnnotationsAreSaved() {
+        val filled = File(dir, "form-filled2.pdf")
+        PdfStudio.fillForm(FormSample.write(File(dir, "form-src2.pdf")), mapOf("name" to "John Doe"), filled)
+        val out = File(dir, "form-annotated.pdf")
+        val note = Annotation(page = 0, kind = AnnotationKind.NOTE, color = "#ffcd45", rect = Box(400.0, 100.0, 22.0, 22.0), comment = "Check the name", author = "Reviewer")
+        PdfStudio.writeAnnotations(filled, listOf(note), out)
+        assertEquals("John Doe", PdfStudio.readFormFields(out).first { it.name == "name" }.value)
+        assertEquals("Check the name", PdfStudio.readAnnotations(out).single { it.kind == AnnotationKind.NOTE }.comment)
+    }
+
     private fun renderPage(file: File, page: Int): Bitmap =
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
             PdfRenderer(fd).use { r -> r.openPage(page).use { p ->

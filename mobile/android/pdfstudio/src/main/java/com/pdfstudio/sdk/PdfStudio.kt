@@ -108,6 +108,17 @@ object PdfStudio {
         }
     }
 
+    /** The PDF's fillable form fields (text, checkbox, radio, dropdown, list) with their current values. */
+    fun readFormFields(file: File): List<FormField> = com.pdfstudio.sdk.pdf.FormFields.read(file)
+
+    /**
+     * Writes a copy of `source` with form `values` (field name → value) filled in; see [FormField] for the value of each
+     * kind. Read-only and unknown fields are skipped. Returns how many fields changed. With `flatten`, the filled fields
+     * become page content and can no longer be edited.
+     */
+    fun fillForm(source: File, values: Map<String, String>, output: File, flatten: Boolean = false): Int =
+        com.pdfstudio.sdk.pdf.FormFields.fill(source, values, output, flatten)
+
     /** Exports a PDF's annotations as XFDF. */
     fun exportXfdf(file: File): String = PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()).use { doc ->
         val geometries = (0 until doc.numberOfPages).map { AnnotationWriter.geometry(doc.getPage(it)) }
