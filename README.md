@@ -16,7 +16,7 @@ Acrobat and Apryse WebViewer do, so annotations saved by an existing PDFTron app
 
 **[Try the live demo →](https://nandkishormewara.github.io/pdf-studio/)** It runs entirely in your browser: your files never leave your device.
 
-![PDF Studio web app: a PDF with a highlight, underline, rectangle, ink, arrow and text box, and the comments panel](docs/images/screenshot.png)
+![PDF Studio web app: opening a PDF, then adding a highlight, underline, rectangle, ink, arrow and a text comment, and opening the comments panel](docs/images/demo.gif)
 
 ## What it does
 
