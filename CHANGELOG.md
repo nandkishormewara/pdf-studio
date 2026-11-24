@@ -12,7 +12,7 @@ First public release.
 - Live demo on GitHub Pages: https://nandkishormewara.github.io/pdf-studio/
 
 ### React viewer
-- `@pdf-studio/react-viewer`: a React component with a WebViewer-style API (`PdfWebViewer`).
+- `@pdf-studio/react-viewer` on npm: a React component with a WebViewer-style API (`PdfWebViewer`).
 
 ### iOS
 - `PDFStudioKit` Swift package (iOS 17+) on Apple PDFKit, with a SwiftUI viewer.

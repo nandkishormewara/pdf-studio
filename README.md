@@ -2,6 +2,7 @@
 
 [![Tests](https://github.com/nandkishormewara/pdf-studio/actions/workflows/tests.yml/badge.svg)](https://github.com/nandkishormewara/pdf-studio/actions/workflows/tests.yml)
 [![Live demo](https://github.com/nandkishormewara/pdf-studio/actions/workflows/pages.yml/badge.svg)](https://nandkishormewara.github.io/pdf-studio/)
+[![npm](https://img.shields.io/npm/v/@pdf-studio/react-viewer.svg)](https://www.npmjs.com/package/@pdf-studio/react-viewer)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms: web, iOS, Android](https://img.shields.io/badge/platforms-web%20%7C%20iOS%20%7C%20Android-lightgrey)
 
@@ -60,10 +61,11 @@ Open the URL Vite prints, then click **Try a sample document** or drop in a PDF 
 ### React component
 
 ```bash
-cd packages/react-viewer
-npm install
-npm run build      # → dist/
+npm install @pdf-studio/react-viewer
 ```
+
+With Vite, also add `optimizeDeps: { exclude: ['@pdf-studio/react-viewer'], include: ['pdf-lib', 'pdfjs-dist'] }`
+to `vite.config.ts`; other bundlers: see the [package README](packages/react-viewer/README.md).
 
 ```tsx
 import { PdfWebViewer } from '@pdf-studio/react-viewer';
